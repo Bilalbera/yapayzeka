@@ -93,8 +93,8 @@ class BILALAI_OT_Server(bpy.types.Operator):
     def modal(self, context: bpy.types.Context, event: bpy.types.Event):
         global _server_instance
  
-        if event.type == "ESC" or _server_instance is None:
-            return self.cancel(context)
+if _server_instance is None:
+    return self.cancel(context)
  
         if event.type != "TIMER":
             return {"PASS_THROUGH"}
@@ -126,7 +126,7 @@ class BILALAI_OT_Server(bpy.types.Operator):
             return {"CANCELLED"}
  
         try:
-            _server_instance = HTTPServer(("localhost", PORT), BilalAIHandler)
+            _server_instance = HTTPServer(("", PORT), BilalAIHandler)
         except OSError as exc:
             self.report({"ERROR"}, f"Cannot bind port {PORT}: {exc}")
             return {"CANCELLED"}
