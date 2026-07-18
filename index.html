@@ -1,63 +1,785 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BilalAI - Yerel Yapay Zeka</title>
-    <style>
-        body { font-family: sans-serif; background: #121212; color: white; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-        #chat-box { width: 80%; height: 400px; border: 1px solid #444; overflow-y: auto; padding: 10px; margin-bottom: 10px; background: #1e1e1e; border-radius: 8px; }
-        #status { color: #00ff00; font-size: 0.9em; margin-bottom: 10px; }
-        input { width: 70%; padding: 10px; border-radius: 5px; border: none; }
-        button { padding: 10px 20px; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 5px; margin-left: 5px; }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BilalAI — Blender Assistant</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+ 
+  :root {
+    --bg:          #0d0f14;
+    --surface:     #13161e;
+    --surface2:    #1a1e28;
+    --border:      #252a38;
+    --accent:      #e87c2e;
+    --accent-dim:  rgba(232, 124, 46, 0.12);
+    --accent-glow: rgba(232, 124, 46, 0.25);
+    --text:        #e8e9ed;
+    --text-muted:  #6b7280;
+    --text-dim:    #9ca3af;
+    --green:       #4ade80;
+    --red:         #f87171;
+    --code-bg:     #0a0c10;
+  }
+ 
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+ 
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100dvh;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 1fr;
+    overflow: hidden;
+  }
+ 
+  /* ── Sidebar ── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 20px;
+    gap: 24px;
+  }
+ 
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+ 
+  .logo-mark {
+    width: 36px;
+    height: 36px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+ 
+  .logo-mark svg { width: 20px; height: 20px; }
+ 
+  .logo-text {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    line-height: 1;
+  }
+ 
+  .logo-sub {
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 3px;
+  }
+ 
+  /* Blender status */
+  .blender-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+ 
+  .blender-card-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+ 
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+ 
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.red   { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+  .dot.pulse { animation: pulse 1.5s infinite; }
+ 
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+ 
+  .status-text { color: var(--text-dim); }
+ 
+  .connect-btn {
+    margin-top: 10px;
+    width: 100%;
+    padding: 8px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    letter-spacing: 0.04em;
+  }
+  .connect-btn:hover { background: rgba(232,124,46,0.2); }
+ 
+  /* Script preview panel */
+  .script-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+ 
+  .script-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+ 
+  .script-panel-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+  }
+ 
+  .copy-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+ 
+  .script-box {
+    flex: 1;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-y: auto;
+    padding: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    color: #8b9dc3;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+ 
+  .script-placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 11px;
+  }
+ 
+  /* ── Main chat area ── */
+  .main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+ 
+  /* Header */
+  .chat-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+ 
+  .chat-title {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+ 
+  .chat-subtitle {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-top: 2px;
+  }
+ 
+  .header-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-muted);
+  }
+ 
+  /* Messages */
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    scroll-behavior: smooth;
+  }
+ 
+  .messages::-webkit-scrollbar { width: 4px; }
+  .messages::-webkit-scrollbar-track { background: transparent; }
+  .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+ 
+  /* Welcome screen */
+  .welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 16px;
+    text-align: center;
+    opacity: 0.6;
+  }
+ 
+  .welcome-icon {
+    width: 56px;
+    height: 56px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+  }
+ 
+  .welcome-icon svg { width: 28px; height: 28px; color: var(--accent); }
+ 
+  .welcome h2 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+  }
+ 
+  .welcome p {
+    font-size: 13px;
+    color: var(--text-muted);
+    max-width: 340px;
+    line-height: 1.6;
+  }
+ 
+  .suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 8px;
+  }
+ 
+  .suggestion-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 7px 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .suggestion-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+ 
+  /* Message bubbles */
+  .message {
+    display: flex;
+    gap: 12px;
+    max-width: 800px;
+  }
+ 
+  .message.user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+  }
+ 
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 700;
+  }
+ 
+  .avatar.ai {
+    background: var(--accent);
+    color: #fff;
+  }
+ 
+  .avatar.user {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+ 
+  .bubble {
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 540px;
+  }
+ 
+  .bubble.ai {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-top-left-radius: 4px;
+  }
+ 
+  .bubble.user {
+    background: var(--accent);
+    color: #fff;
+    border-top-right-radius: 4px;
+    font-weight: 500;
+  }
+ 
+  .bubble-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+  }
+ 
+  .sent-badge {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+  .sent-badge.ok  { background: rgba(74,222,128,0.12); color: var(--green); }
+  .sent-badge.err { background: rgba(248,113,113,0.12); color: var(--red); }
+ 
+  .view-script-btn {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .view-script-btn:hover { background: rgba(232,124,46,0.25); }
+ 
+  /* Typing indicator */
+  .typing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 14px 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    border-top-left-radius: 4px;
+    width: fit-content;
+  }
+ 
+  .typing-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    animation: typing-bounce 1.2s infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+ 
+  @keyframes typing-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30%            { transform: translateY(-6px); opacity: 1; }
+  }
+ 
+  /* Input area */
+  .input-area {
+    padding: 20px 28px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+ 
+  .input-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 10px 10px 16px;
+    transition: border-color 0.2s;
+  }
+ 
+  .input-row:focus-within { border-color: var(--accent); }
+ 
+  textarea {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    resize: none;
+    line-height: 1.5;
+    min-height: 24px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+ 
+  textarea::placeholder { color: var(--text-muted); }
+ 
+  .send-btn {
+    width: 36px;
+    height: 36px;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .send-btn:hover   { background: #d4702a; }
+  .send-btn:active  { transform: scale(0.94); }
+  .send-btn:disabled { background: var(--surface); cursor: default; }
+  .send-btn svg { width: 16px; height: 16px; color: #fff; }
+ 
+  .input-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    text-align: center;
+  }
+ 
+  /* Scrollbar for script box */
+  .script-box::-webkit-scrollbar { width: 3px; }
+  .script-box::-webkit-scrollbar-thumb { background: var(--border); }
+</style>
 </head>
 <body>
-
-    <h1>BilalAI - %100 Yerel</h1>
-    <div id="status">Yükleniyor... (Lütfen WebGPU destekli bir tarayıcı kullan: Chrome/Edge)</div>
-    <div id="chat-box"></div>
-    
-    <div style="width: 80%; display: flex;">
-        <input type="text" id="user-input" placeholder="Bir şey sor...">
-        <button id="send-btn">Gönder</button>
+ 
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-mark">
+      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 2L17 6V14L10 18L3 14V6L10 2Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M10 2V18M3 6L17 14M17 6L3 14" stroke="white" stroke-width="1.2" opacity="0.5"/>
+      </svg>
     </div>
-
-    <script type="module">
-        import * as webllm from "https://esm.run/@mlc-ai/web-llm";
-
-        const chatBox = document.getElementById("chat-box");
-        const status = document.getElementById("status");
-        const input = document.getElementById("user-input");
-        const btn = document.getElementById("send-btn");
-
-        // Kullanacağımız model (Llama-3-8B'nin çok küçük ve hızlı bir versiyonu)
-        const selectedModel = "Llama-3-8B-Instruct-q4f32_1-MLC";
-
-        const engine = await webllm.CreateMLCEngine(selectedModel, {
-            initProgressCallback: (report) => {
-                status.innerText = report.text; // Yükleme aşamasını gösterir
-            }
-        });
-
-        async function askAI() {
-            const text = input.value;
-            if (!text) return;
-
-            chatBox.innerHTML += `<div><b>Sen:</b> ${text}</div>`;
-            input.value = "";
-
-            const messages = [{ role: "user", content: text }];
-            
-            let aiResponse = "";
-            const reply = await engine.chat.completions.create({ messages });
-            aiResponse = reply.choices[0].message.content;
-
-            chatBox.innerHTML += `<div><b>BilalAI:</b> ${aiResponse}</div>`;
-            chatBox.scrollTop = chatBox.scrollHeight;
+    <div>
+      <div class="logo-text">BilalAI</div>
+      <div class="logo-sub">Blender Assistant</div>
+    </div>
+  </div>
+ 
+  <div class="blender-card">
+    <div class="blender-card-label">Blender Connection</div>
+    <div class="status-row">
+      <div class="dot red pulse" id="status-dot"></div>
+      <span class="status-text" id="status-text">Not connected</span>
+    </div>
+    <button class="connect-btn" id="check-btn" onclick="checkBlender()">Check Connection</button>
+  </div>
+ 
+  <div class="script-panel">
+    <div class="script-panel-header">
+      <span class="script-panel-label">Last Script</span>
+      <button class="copy-btn" id="copy-btn" onclick="copyScript()">Copy</button>
+    </div>
+    <div class="script-box" id="script-box">
+      <span class="script-placeholder">Scripts generated by BilalAI will appear here.</span>
+    </div>
+  </div>
+</aside>
+ 
+<!-- ── Main ── -->
+<main class="main">
+  <div class="chat-header">
+    <div>
+      <div class="chat-title">Ask BilalAI</div>
+      <div class="chat-subtitle">Describe a character, scene, or animation</div>
+    </div>
+    <div class="header-badge">claude-sonnet-4-6</div>
+  </div>
+ 
+  <div class="messages" id="messages">
+    <div class="welcome" id="welcome">
+      <div class="welcome-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <h2>What should we build?</h2>
+      <p>BilalAI translates your description into Blender Python and sends it straight to your viewport.</p>
+      <div class="suggestions">
+        <div class="suggestion-chip" onclick="suggest(this)">Low-poly robot character</div>
+        <div class="suggestion-chip" onclick="suggest(this)">Bouncing ball animation</div>
+        <div class="suggestion-chip" onclick="suggest(this)">Stylized mountain scene</div>
+        <div class="suggestion-chip" onclick="suggest(this)">Spinning logo with glow</div>
+        <div class="suggestion-chip" onclick="suggest(this)">Humanoid rig with walk cycle</div>
+        <div class="suggestion-chip" onclick="suggest(this)">Crystal cave with materials</div>
+      </div>
+    </div>
+  </div>
+ 
+  <div class="input-area">
+    <div class="input-row">
+      <textarea
+        id="input"
+        rows="1"
+        placeholder="Describe a character, scene, or animation..."
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this)"
+      ></textarea>
+      <button class="send-btn" id="send-btn" onclick="send()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+    <div class="input-hint">Connected to Blender on localhost:9001 · Powered by Claude</div>
+  </div>
+</main>
+ 
+<script>
+  const API_BASE   = 'http://localhost:8000';
+  let   history    = [];
+  let   lastScript = null;
+  let   sending    = false;
+ 
+  // ── Auto-resize textarea ───────────────────────────────────────────────────
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  }
+ 
+  // ── Suggestion chips ───────────────────────────────────────────────────────
+  function suggest(el) {
+    document.getElementById('input').value = el.textContent;
+    autoResize(document.getElementById('input'));
+    send();
+  }
+ 
+  // ── Blender health check ───────────────────────────────────────────────────
+  async function checkBlender() {
+    const dot  = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+    dot.className = 'dot red pulse';
+    text.textContent = 'Checking...';
+ 
+    try {
+      const r = await fetch(`${API_BASE}/blender/status`);
+      const d = await r.json();
+      if (d.connected) {
+        dot.className = 'dot green';
+        text.textContent = 'Connected :9001';
+      } else {
+        dot.className = 'dot red';
+        text.textContent = 'Blender not found';
+      }
+    } catch {
+      dot.className = 'dot red';
+      text.textContent = 'Backend offline';
+    }
+  }
+ 
+  // ── Copy script ────────────────────────────────────────────────────────────
+  async function copyScript() {
+    if (!lastScript) return;
+    await navigator.clipboard.writeText(lastScript);
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  }
+ 
+  // ── Keyboard shortcut ──────────────────────────────────────────────────────
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
+ 
+  // ── Render helpers ─────────────────────────────────────────────────────────
+  function appendMessage(role, content, meta = null) {
+    const welcome = document.getElementById('welcome');
+    if (welcome) welcome.remove();
+ 
+    const msgs = document.getElementById('messages');
+ 
+    const wrap   = document.createElement('div');
+    wrap.className = `message ${role}`;
+ 
+    const avatar = document.createElement('div');
+    avatar.className = `avatar ${role}`;
+    avatar.textContent = role === 'ai' ? 'B' : 'U';
+ 
+    const bubble = document.createElement('div');
+    bubble.className = `bubble ${role}`;
+    bubble.textContent = content;
+ 
+    if (meta && role === 'ai') {
+      const metaRow = document.createElement('div');
+      metaRow.className = 'bubble-meta';
+ 
+      if (meta.blender_ok === true) {
+        const badge = document.createElement('span');
+        badge.className = 'sent-badge ok';
+        badge.textContent = '✓ Sent to Blender';
+        metaRow.appendChild(badge);
+      } else if (meta.blender_ok === false) {
+        const badge = document.createElement('span');
+        badge.className = 'sent-badge err';
+        badge.textContent = '✗ Blender offline';
+        metaRow.appendChild(badge);
+      }
+ 
+      if (meta.script) {
+        const viewBtn = document.createElement('button');
+        viewBtn.className = 'view-script-btn';
+        viewBtn.textContent = 'View script';
+        viewBtn.onclick = () => showScript(meta.script);
+        metaRow.appendChild(viewBtn);
+      }
+ 
+      bubble.appendChild(metaRow);
+    }
+ 
+    wrap.appendChild(avatar);
+    wrap.appendChild(bubble);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+ 
+    return wrap;
+  }
+ 
+  function appendTyping() {
+    const msgs = document.getElementById('messages');
+ 
+    const wrap   = document.createElement('div');
+    wrap.className = 'message ai';
+    wrap.id = 'typing-indicator';
+ 
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar ai';
+    avatar.textContent = 'B';
+ 
+    const typing = document.createElement('div');
+    typing.className = 'typing';
+    [0,1,2].forEach(() => {
+      const d = document.createElement('div');
+      d.className = 'typing-dot';
+      typing.appendChild(d);
+    });
+ 
+    wrap.appendChild(avatar);
+    wrap.appendChild(typing);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+ 
+  function removeTyping() {
+    document.getElementById('typing-indicator')?.remove();
+  }
+ 
+  function showScript(script) {
+    lastScript = script;
+    const box = document.getElementById('script-box');
+    box.textContent = script;
+  }
+ 
+  // ── Main send ──────────────────────────────────────────────────────────────
+  async function send() {
+    if (sending) return;
+    const input = document.getElementById('input');
+    const text  = input.value.trim();
+    if (!text) return;
+ 
+    sending = true;
+    document.getElementById('send-btn').disabled = true;
+    input.value = '';
+    input.style.height = 'auto';
+ 
+    appendMessage('user', text);
+    history.push({ role: 'user', content: text });
+ 
+    appendTyping();
+ 
+    try {
+      const resp = await fetch(`${API_BASE}/chat`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ messages: history, send_to_blender: true }),
+      });
+ 
+      if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+      const data = await resp.json();
+ 
+      removeTyping();
+      appendMessage('ai', data.reply, { blender_ok: data.blender_ok, script: data.script });
+      history.push({ role: 'assistant', content: data.reply });
+ 
+      if (data.script) showScript(data.script);
+ 
+      // Refresh connection status
+      if (data.blender_ok !== null) {
+        const dot  = document.getElementById('status-dot');
+        const text = document.getElementById('status-text');
+        if (data.blender_ok) {
+          dot.className  = 'dot green';
+          text.textContent = 'Connected :9001';
+        } else {
+          dot.className  = 'dot red';
+          text.textContent = 'Blender not found';
         }
-
-        btn.onclick = askAI;
-    </script>
+      }
+ 
+    } catch (err) {
+      removeTyping();
+      appendMessage('ai', `Connection error: ${err.message}. Is the backend running on port 8000?`);
+    }
+ 
+    sending = false;
+    document.getElementById('send-btn').disabled = false;
+    input.focus();
+  }
+ 
+  // Initial connection check
+  checkBlender();
+</script>
 </body>
 </html>
