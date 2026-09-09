@@ -28,23 +28,23 @@
 
   /* ========== Modeller ========== */
   const MODELS = {
-    flash: {
-      name: 'BilalAI 1.1 - Flash',
-      shortName: 'Flash',
-      icon: '⚡',
-      color: '#00BFFF',
-      thinkingMs: [700, 1500],
-      style: 'hızlı ve dengeli',
-      engine: 'BilalAIResponseEngine'
-    },
     flashlite: {
-      name: 'BilalAI 1.0 - FlashLite',
+      name: 'BilalAI - FlashLite - 1.0',
       shortName: 'FlashLite',
       icon: '⚡',
       color: '#F59E0B',
       thinkingMs: [500, 1000],
       style: 'ultra hızlı, kısa cevaplar',
       engine: 'BilalAIFlashLite'
+    },
+    flash: {
+      name: 'BilalAI - Flash 1.1',
+      shortName: 'Flash',
+      icon: '⚡',
+      color: '#00BFFF',
+      thinkingMs: [700, 1500],
+      style: 'hızlı ve dengeli',
+      engine: 'BilalAIResponseEngine'
     }
   };
 
@@ -172,13 +172,13 @@
 
     // ===== YENİ EKLENENLER (v1.2) =====
     // 1) Dashboard
-    dashKPI1: $('#dashKPI1'),
-    dashKPI2: $('#dashKPI2'),
-    dashKPI3: $('#dashKPI3'),
-    dashKPI4: $('#dashKPI4'),
-    dashWeeklyChart: $('#dashWeeklyChart'),
+    dashKPI1: $('#dashChats'),
+    dashKPI2: $('#dashMessages'),
+    dashKPI3: $('#dashActiveModel'),
+    dashKPI4: $('#dashLikes'),
+    dashWeeklyChart: $('#dashBarChart'),
     dashTopSkills: $('#dashTopSkills'),
-    dashRecentActivity: $('#dashRecentActivity'),
+    dashRecentActivity: $('#dashActivity'),
     dashAppInfo: $('#dashAppInfo'),
 
     // 2) Performans sekmesi
@@ -194,7 +194,8 @@
     newModelIcon: $('#newModelIcon'),
     newModelColor: $('#newModelColor'),
     newModelThinking: $('#newModelThinking'),
-    addModelBtn: $('#addModelBtn'),
+    newModelDesc: $('#newModelDesc'),
+    addModelBtn: $('#addNewModelBtn'),
 
     // 4) Sohbetler sekmesi
     chatSortBy: $('#chatSortBy'),
@@ -216,8 +217,8 @@
 
     // 8) Ayarlar sekmesi
     accentColor: $('#accentColor'),
-    showWelcomeToggle: $('#showWelcomeToggle'),
-    defaultModelSelect: $('#defaultModelSelect'),
+    showWelcomeToggle: $('#showWelcome'),
+    defaultModelSelect: $('#defaultModel'),
     changePassBtn: $('#changePassBtn'),
     oldPass: $('#oldPass'),
     newPass: $('#newPass'),
@@ -516,7 +517,7 @@
     if (!bubble) return;
     const wraps = bubble.querySelectorAll('.code-wrap');
     if (!wraps || wraps.length === 0) return;
-    wraps.forEach(function (wrap) {
+    wraps.forEach(function (wrap, i) {
       if (wrap.dataset.actionsInjected === '1') return;
       wrap.dataset.actionsInjected = '1';
       const idx = parseInt(wrap.dataset.codeIdx, 10);
@@ -525,24 +526,24 @@
       const cb = store[idx];
       const codeContent = cb ? cb.code : (wrap.querySelector('code') ? wrap.querySelector('code').innerText : '');
 
-      // Dosya adı + uzantı + boyut
       const ext = getFileExtForLang(lang);
-      const filename = (lang || 'code') + '_' + Math.floor(Math.random() * 9000 + 1000) + ext;
+      const lineCount = codeContent.split('\n').length;
+      const ts = Date.now().toString(36).slice(-4) + '_' + (i + 1);
+      const langPrefix = (lang && lang.length > 0) ? lang.replace(/[^a-z0-9]/gi, '_') : 'code';
+      const filename = langPrefix + '_' + ts + ext;
       const size = new Blob([codeContent]).size;
       const sizeText = formatBytes(size);
 
-      // code-wrap'ın KENDİSİNİ code-file-card içine taşı
       const card = document.createElement('div');
       card.className = 'code-file-card';
 
-      // Üst başlık (file header)
       const header = document.createElement('div');
       header.className = 'code-file-header';
       header.innerHTML = `
         <div class="code-file-title">
           <span class="code-file-icon">📄</span>
           <span class="code-file-name">${escapeHtml(filename)}</span>
-          <span class="code-file-size">${sizeText}</span>
+          <span class="code-file-size">${sizeText} · ${lineCount} satır</span>
         </div>
         <div class="code-file-btns">
           <button type="button" class="code-collapse-btn" title="Daralt/Genişlet">
@@ -552,7 +553,7 @@
             <span>📋 Kopyala</span>
           </button>
           <button type="button" class="code-action-btn primary dl-download-btn" data-act="download" title="İndir">
-            <span>⬇️ ${escapeHtml(filename)}</span>
+            <span>⬇️ İndir</span>
           </button>
         </div>
       `;
@@ -561,7 +562,6 @@
       wrap.parentNode.insertBefore(card, wrap);
       card.appendChild(wrap);
 
-      // Collapse toggle
       const colBtn = header.querySelector('.code-collapse-btn');
       const collapseIcon = colBtn.querySelector('svg');
       colBtn.addEventListener('click', () => {
@@ -570,7 +570,6 @@
         collapseIcon.style.transform = expanded ? 'rotate(180deg)' : '';
       });
 
-      // Butonlar
       header.querySelectorAll('button[data-act]').forEach(btn => {
         btn.addEventListener('click', async () => {
           const act = btn.dataset.act;
@@ -583,7 +582,7 @@
               setTimeout(() => label.textContent = old, 1800);
             } else {
               label.textContent = '❌ Başarısız';
-              setTimeout(() => label.textContent = '⬇️ ' + filename, 1800);
+              setTimeout(() => label.textContent = '⬇️ İndir', 1800);
             }
           } else if (act === 'copy') {
             try {
@@ -1453,7 +1452,9 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
   }
   function tryAdminLogin() {
     const pw = dom.founderPassword.value;
-    if (pw === FOUNDER_PASSWORD) {
+    const savedPass = lsGet('bilalai_founder_pass', null);
+    const isCorrect = (pw === FOUNDER_PASSWORD) || (savedPass && pw === savedPass);
+    if (isCorrect) {
       state.adminAuthenticated = true;
       showAdminPanel();
       showToast('🛡️ Kurucu paneline hoş geldiniz, Bilal.', 'success');
@@ -1492,8 +1493,10 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
     // 4 KPI kutucuğu
     if (dom.dashKPI1) dom.dashKPI1.textContent = String(chats.length);
     if (dom.dashKPI2) dom.dashKPI2.textContent = String(totalMsg);
-    if (dom.dashKPI3) dom.dashKPI3.textContent = String(Math.round(perf.score || 0));
-    if (dom.dashKPI4) dom.dashKPI4.textContent = String(todaysMsgs);
+    const s = lsGet(LS.SETTINGS, {});
+    const activeM = MODELS[s.currentModel] || MODELS.flashlite;
+    if (dom.dashKPI3) dom.dashKPI3.textContent = (activeM.shortName || activeM.name || '-').toString();
+    if (dom.dashKPI4) dom.dashKPI4.textContent = String(perf.likes || 0);
 
     // 7 günlük bar chart (rastgele + gerçek veriyi birleştir)
     if (dom.dashWeeklyChart) {
@@ -1697,7 +1700,7 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
     // Ortalama beceri seviyesi
     const skillEntries = Object.values(skills || {});
     const avgSkill = skillEntries.length === 0 ? 0 :
-      Math.round(skillEntries.reduce((a, b) => a + (Number(b.level) || 0), 0) / skillEntries.length;
+      Math.round(skillEntries.reduce((a, b) => a + (Number(b.level) || 0), 0) / skillEntries.length);
     if (dom.avgSkillLevel) dom.avgSkillLevel.textContent = (avgSkill || 0).toFixed(1) + ' / 99';
   }
 
@@ -2141,6 +2144,273 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
     dom.exportJsonBtn.addEventListener('click', exportAllJson);
     dom.exportTxtBtn.addEventListener('click', exportAllTxt);
     dom.resetMemoryBtn.addEventListener('click', resetAllMemory);
+
+    // ===== YENİ EVENTLER: PERFORMANS SEKMESİ =====
+    if (dom.boostPerfBtn) dom.boostPerfBtn.addEventListener('click', () => {
+      const p = lsGet(LS.PERF);
+      p.score = Math.min(100, Number(p.score || 0) + 10);
+      p.history = p.history || [];
+      p.history.push({ date: new Date().toISOString(), action: 'boost', score: p.score });
+      lsSet(LS.PERF, p);
+      renderAdminPerformance();
+      showToast('✨ Performans puanı +10 arttırıldı!', 'success');
+    });
+    if (dom.resetSkillsPerfBtn) dom.resetSkillsPerfBtn.addEventListener('click', () => {
+      if (!confirm('Beceri seviyelerini ve performans puanını sıfırlamak istiyor musunuz?')) return;
+      lsSet(LS.SKILLS, structuredClone(DEFAULT_SKILLS));
+      const p = lsGet(LS.PERF); p.score = 75; p.likes = 0; p.dislikes = 0; p.history = []; lsSet(LS.PERF, p);
+      renderAdminSkills(); renderAdminPerformance();
+      showToast('🔄 Beceriler ve performans sıfırlandı.', 'success');
+    });
+
+    // ===== YENİ EVENTLER: MODELLER SEKMESİ =====
+    if (dom.addModelBtn) dom.addModelBtn.addEventListener('click', () => {
+      const name = (dom.newModelName.value || '').trim();
+      if (!name) { showToast('⚠️ Model adı gerekli.', 'error'); return; }
+      const shortName = (dom.newModelShort.value || '').trim() || name.slice(0, 10);
+      const icon = (dom.newModelIcon.value || '🤖').trim() || '🤖';
+      const color = (dom.newModelColor.value || '#8B5CF6').trim() || '#8B5CF6';
+      const thinkingStr = (dom.newModelThinking.value || '800-1800').trim();
+      const [tmin, tmax] = thinkingStr.split('-').map(x => parseInt(x, 10));
+      const thinkingMs = [isNaN(tmin) ? 800 : tmin, isNaN(tmax) ? 1800 : tmax];
+      const style = (dom.newModelDesc.value || '').trim() || 'Özel model';
+      const extraKey = 'bilalai_custom_models';
+      const extra = lsGet(extraKey, {});
+      const key = 'custom_' + Date.now().toString(36);
+      extra[key] = { name, shortName, icon, color, thinkingMs, style, engine: 'BilalAIResponseEngine' };
+      lsSet(extraKey, extra);
+      dom.newModelName.value = '';
+      dom.newModelShort.value = '';
+      dom.newModelDesc.value = '';
+      renderAdminModels(); renderAdminAll();
+      showToast('💾 Yeni model kaydedildi: ' + name, 'success');
+    });
+    // Modeller listesinde action butonları (delegasyon)
+    document.addEventListener('click', (e) => {
+      const li = e.target.closest('.models-admin-list-item');
+      if (!li) return;
+      const key = li.dataset.modelKey;
+      if (!key) return;
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      if (act === 'default') {
+        const s = lsGet(LS.SETTINGS);
+        s.currentModel = key;
+        lsSet(LS.SETTINGS, s);
+        applyModelToUI();
+        renderAdminModels();
+        showToast('⭐ Varsayılan model güncellendi.', 'success');
+      } else if (act === 'delete') {
+        if (!confirm('Bu özel modeli silmek istiyor musunuz?')) return;
+        const extraKey = 'bilalai_custom_models';
+        const extra = lsGet(extraKey, {});
+        delete extra[key];
+        lsSet(extraKey, extra);
+        const s = lsGet(LS.SETTINGS);
+        if (s.currentModel === key) { s.currentModel = 'flashlite'; lsSet(LS.SETTINGS, s); applyModelToUI(); }
+        renderAdminModels(); renderAdminAll();
+        showToast('🗑️ Model silindi.', 'success');
+      }
+    });
+
+    // ===== YENİ EVENTLER: SOHBETLER SEKMESİ =====
+    if (dom.chatSortBy) dom.chatSortBy.addEventListener('change', () => renderAdminChats(dom.chatSearch.value || ''));
+    if (dom.selectAllChats) dom.selectAllChats.addEventListener('change', (e) => {
+      const chats = lsGet(LS.CHATS, []);
+      state.selectedChats = state.selectedChats || new Set();
+      if (e.target.checked) chats.forEach(c => state.selectedChats.add(c.id));
+      else state.selectedChats.clear();
+      renderAdminChats(dom.chatSearch.value || '');
+    });
+    if (dom.exportSelectedChatsBtn) dom.exportSelectedChatsBtn.addEventListener('click', () => {
+      state.selectedChats = state.selectedChats || new Set();
+      if (state.selectedChats.size === 0) { showToast('⚠️ Lütfen önce sohbet seçin.', 'error'); return; }
+      const chats = lsGet(LS.CHATS, []).filter(c => state.selectedChats.has(c.id));
+      downloadBlob(JSON.stringify(chats, null, 2), `secili_sohbetler_${Date.now()}.json`, 'application/json');
+      showToast('📥 ' + chats.length + ' sohbet JSON olarak indirildi.', 'success');
+    });
+    if (dom.deleteSelectedChatsBtn) dom.deleteSelectedChatsBtn.addEventListener('click', () => {
+      state.selectedChats = state.selectedChats || new Set();
+      if (state.selectedChats.size === 0) { showToast('⚠️ Lütfen önce sohbet seçin.', 'error'); return; }
+      if (!confirm(state.selectedChats.size + ' sohbeti silmek istiyor musunuz?')) return;
+      const chats = lsGet(LS.CHATS, []).filter(c => !state.selectedChats.has(c.id));
+      lsSet(LS.CHATS, chats);
+      if (state.currentChatId && state.selectedChats.has(state.currentChatId)) state.currentChatId = null;
+      state.selectedChats.clear();
+      loadChats(); ensureChatExists(); renderChatList(); renderMessages();
+      renderAdminChats(dom.chatSearch.value || ''); renderAdminAll();
+      showToast('🗑️ Seçili sohbetler silindi.', 'success');
+    });
+
+    // ===== YENİ EVENTLER: BECERİLER SEKMESİ =====
+    // newSkillLevel değeri yanındaki span'ı güncelle
+    const newSkillLevelEl = document.getElementById('newSkillLevel');
+    const newSkillLevelValEl = document.getElementById('newSkillLevelValue');
+    if (newSkillLevelEl && newSkillLevelValEl) {
+      newSkillLevelEl.addEventListener('input', (e) => { newSkillLevelValEl.textContent = String(e.target.value); });
+    }
+    if (dom.trainSkillsBtn) dom.trainSkillsBtn.addEventListener('click', () => {
+      const skills = lsGet(LS.SKILLS, {});
+      Object.keys(skills).forEach(k => {
+        skills[k].level = Math.min(99, Number(skills[k].level || 0) + randInt(0, 8));
+        skills[k].practices = (skills[k].practices || 0) + 1;
+      });
+      lsSet(LS.SKILLS, skills);
+      renderAdminSkills();
+      showToast('🎲 Tüm beceriler rastgele eğitildi!', 'success');
+    });
+    if (dom.resetSkillsBtn) dom.resetSkillsBtn.addEventListener('click', () => {
+      if (!confirm('Tüm becerileri varsayılan seviyeye sıfırlamak istiyor musunuz?')) return;
+      lsSet(LS.SKILLS, structuredClone(DEFAULT_SKILLS));
+      renderAdminSkills(); renderAdminPerformance(); renderAdminDashboard();
+      showToast('🔄 Beceriler sıfırlandı.', 'success');
+    });
+    if (dom.addNewSkillBtn) dom.addNewSkillBtn.addEventListener('click', () => {
+      const name = (dom.newSkillName.value || '').trim();
+      if (!name) { showToast('⚠️ Beceri adı gerekli.', 'error'); return; }
+      const skills = lsGet(LS.SKILLS, {});
+      const lvl = dom.newSkillLevel ? Number(dom.newSkillLevel.value) || 60 : 60;
+      if (skills[name]) { showToast('⚠️ Bu beceri zaten var.', 'error'); return; }
+      skills[name] = { level: Math.max(0, Math.min(99, lvl)), practices: 0 };
+      lsSet(LS.SKILLS, skills);
+      dom.newSkillName.value = '';
+      if (dom.newSkillLevel) dom.newSkillLevel.value = 60;
+      if (newSkillLevelValEl) newSkillLevelValEl.textContent = '60';
+      renderAdminSkills(); renderAdminPerformance(); renderAdminDashboard();
+      showToast('✅ Yeni beceri eklendi: ' + name, 'success');
+    });
+    // Beceri listesi action delegasyonu (+5 puan, slider, sil)
+    document.addEventListener('click', (e) => {
+      const si = e.target.closest('.skill-item');
+      if (!si) return;
+      const name = si.dataset.skillName;
+      if (!name) return;
+      const skills = lsGet(LS.SKILLS, {});
+      if (!skills[name]) return;
+      const boostBtn = e.target.closest('.skill-btn.boost');
+      const removeBtn = e.target.closest('.skill-btn.remove');
+      if (boostBtn) {
+        skills[name].level = Math.min(99, Number(skills[name].level || 0) + 5);
+        skills[name].practices = (skills[name].practices || 0) + 1;
+        lsSet(LS.SKILLS, skills);
+        renderAdminSkills(); renderAdminPerformance(); renderAdminDashboard();
+        showToast('⬆️ ' + name + ' +5 puan kazandı!', 'success');
+      } else if (removeBtn) {
+        if (!confirm(name + ' becerisini silmek istiyor musunuz?')) return;
+        delete skills[name];
+        lsSet(LS.SKILLS, skills);
+        renderAdminSkills(); renderAdminPerformance(); renderAdminDashboard();
+        showToast('🗑️ Beceri silindi.', 'success');
+      }
+    });
+    // Beceri slider delegasyonu
+    document.addEventListener('input', (e) => {
+      const sl = e.target.closest('.skill-slider');
+      if (!sl) return;
+      const si = sl.closest('.skill-item');
+      if (!si) return;
+      const name = si.dataset.skillName;
+      if (!name) return;
+      const val = Number(sl.value) || 0;
+      const skills = lsGet(LS.SKILLS, {});
+      if (skills[name]) {
+        skills[name].level = Math.max(0, Math.min(99, val));
+        lsSet(LS.SKILLS, skills);
+        si.querySelector('.skill-level-num').textContent = Math.round(skills[name].level) + ' / 99';
+        si.querySelector('.skill-bar-fill').style.width = (skills[name].level / 99 * 100).toFixed(1) + '%';
+        renderAdminPerformance();
+      }
+    });
+
+    // ===== YENİ EVENTLER: HATA GÜNLÜĞÜ =====
+    if (dom.errFilter) dom.errFilter.addEventListener('change', () => renderAdminErrors());
+    if (dom.clearErrorsBtn) dom.clearErrorsBtn.addEventListener('click', () => {
+      if (!confirm('Tüm hata kayıtlarını silmek istiyor musunuz?')) return;
+      lsSet(LS.ERRORS, []);
+      renderAdminErrors(); renderAdminDashboard();
+      showToast('🧹 Hata günlüğü temizlendi.', 'success');
+    });
+    // Hata listesi delegasyonu (düzeltildi/sil)
+    document.addEventListener('click', (e) => {
+      const errItem = e.target.closest('.error-item');
+      if (!errItem) return;
+      const idx = parseInt(errItem.dataset.errIdx, 10);
+      if (isNaN(idx)) return;
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const errors = lsGet(LS.ERRORS, []);
+      const filter = dom.errFilter ? (dom.errFilter.value || 'all') : 'all';
+      let list = errors;
+      const now = Date.now();
+      if (filter === 'day') list = errors.filter(e => now - new Date(e.timestamp).getTime() < 24 * 3600 * 1000);
+      else if (filter === 'week') list = errors.filter(e => now - new Date(e.timestamp).getTime() < 7 * 24 * 3600 * 1000);
+      const realErr = list[idx];
+      if (!realErr) return;
+      const realIdx = errors.indexOf(realErr);
+      if (realIdx < 0) return;
+      if (act === 'resolve') {
+        errors[realIdx].resolved = !errors[realIdx].resolved;
+        lsSet(LS.ERRORS, errors);
+        renderAdminErrors(); renderAdminDashboard();
+        showToast(errors[realIdx].resolved ? '✅ Hata düzeltildi olarak işaretlendi.' : '↩️ İşlem geri alındı.', 'success');
+      } else if (act === 'delete') {
+        if (!confirm('Bu hata kaydını silmek istiyor musunuz?')) return;
+        errors.splice(realIdx, 1);
+        lsSet(LS.ERRORS, errors);
+        renderAdminErrors(); renderAdminDashboard();
+        showToast('🗑️ Hata kaydı silindi.', 'success');
+      }
+    });
+
+    // ===== YENİ EVENTLER: AYARLAR SEKMESİ =====
+    if (dom.accentColor) {
+      const s = lsGet(LS.SETTINGS, {});
+      if (s.accent) dom.accentColor.value = s.accent;
+      dom.accentColor.addEventListener('input', (e) => {
+        const color = e.target.value;
+        document.documentElement.style.setProperty('--accent', color);
+        const st = lsGet(LS.SETTINGS, {});
+        st.accent = color;
+        lsSet(LS.SETTINGS, st);
+      });
+    }
+    if (dom.showWelcomeToggle) {
+      const s = lsGet(LS.SETTINGS, {});
+      if (typeof s.showWelcome === 'boolean') dom.showWelcomeToggle.checked = s.showWelcome;
+      dom.showWelcomeToggle.addEventListener('change', (e) => {
+        const st = lsGet(LS.SETTINGS, {});
+        st.showWelcome = e.target.checked;
+        lsSet(LS.SETTINGS, st);
+        if (!st.showWelcome) dom.welcomeScreen.style.display = 'none';
+        else { const chat = getCurrentChat(); if (!chat || !chat.messages || chat.messages.length === 0) dom.welcomeScreen.style.display = ''; }
+      });
+    }
+    if (dom.defaultModelSelect) {
+      dom.defaultModelSelect.addEventListener('change', (e) => {
+        const st = lsGet(LS.SETTINGS, {});
+        st.currentModel = e.target.value;
+        lsSet(LS.SETTINGS, st);
+        applyModelToUI();
+        renderAdminModels();
+        showToast('🤖 Varsayılan model: ' + (MODELS[e.target.value] ? MODELS[e.target.value].name : e.target.value), 'success');
+      });
+    }
+    if (dom.changePassBtn) dom.changePassBtn.addEventListener('click', () => {
+      const oldP = dom.oldPass.value;
+      const newP = dom.newPass.value;
+      const newP2 = dom.newPass2.value;
+      // LS'den kurucu parolasını al (daha önce değiştirildiyse)
+      const savedPass = lsGet('bilalai_founder_pass', null);
+      const currentPass = savedPass || FOUNDER_PASSWORD;
+      if (oldP !== currentPass) { showToast('❌ Mevcut parola yanlış.', 'error'); return; }
+      if (!newP || newP.length < 4) { showToast('⚠️ Yeni parola en az 4 karakter olmalı.', 'error'); return; }
+      if (newP !== newP2) { showToast('❌ Yeni parolalar eşleşmiyor.', 'error'); return; }
+      lsSet('bilalai_founder_pass', newP);
+      dom.oldPass.value = ''; dom.newPass.value = ''; dom.newPass2.value = '';
+      showToast('🔑 Kurucu parolası güncellendi!', 'success');
+    });
   }
 
   /* ========== Başlangıç ========== */

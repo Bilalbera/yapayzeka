@@ -242,7 +242,7 @@
             <span class="model-card-icon">⚡</span>
           </div>
           <div class="model-card-info">
-            <div class="model-card-name">BilalAI 1.1 - Flash</div>
+            <div class="model-card-name">BilalAI - Flash 1.1</div>
             <div class="model-card-desc">
               Hızlı, dengeli ve çok yönlü. Basitten karmaşığa her seviyede kod üretimi, günlük sohbet,
               tasarım önerileri, içerik geliştirme ve genel amaçlı sorular için en ideal seçim. Düşünme süresi: <strong>0.7 - 1.5 sn</strong>
@@ -400,9 +400,16 @@
           <div id="modelsList" class="models-admin-list"></div>
           <div class="sub-title" style="margin-top:22px;">➕ Yeni Model Ekle</div>
           <div class="model-add-form">
-            <input type="text" class="admin-input" id="newModelName" placeholder="Model adı (örn: DeepThink 1.0)" />
-            <textarea class="admin-textarea" id="newModelDesc" placeholder="Model kısa açıklaması..." rows="2"></textarea>
-            <button class="btn-primary" id="addNewModelBtn">💾 Modeli Kaydet</button>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <input type="text" class="admin-input" id="newModelName" placeholder="Model adı (örn: DeepThink 1.0)" />
+              <input type="text" class="admin-input" id="newModelShort" placeholder="Kısa adı (örn: DT)" />
+              <input type="text" class="admin-input" id="newModelIcon" placeholder="İkon emoji (örn: 🧠)" value="🧠" />
+              <input type="text" class="admin-input" id="newModelColor" placeholder="Renk kodu (örn: #8B5CF6)" value="#8B5CF6" />
+              <input type="text" class="admin-input" id="newModelThinking" placeholder="Düşünme ms (örn: 800-1800)" value="800-1800" />
+              <div></div>
+            </div>
+            <textarea class="admin-textarea" id="newModelDesc" placeholder="Model kısa açıklaması / stili..." rows="2" style="margin-top:10px;"></textarea>
+            <button class="btn-primary" id="addNewModelBtn" style="margin-top:8px;">💾 Modeli Kaydet</button>
           </div>
         </div>
 
@@ -438,6 +445,11 @@
           <div class="sub-title" style="margin-top:4px;">➕ Yeni Beceri Ekle</div>
           <div class="skill-add-form">
             <input type="text" class="admin-input" id="newSkillName" placeholder="Beceri adı (örn: REST API)" />
+            <div style="display:flex;align-items:center;gap:10px;width:100%;margin-top:-4px;">
+              <label style="color:var(--text-secondary);font-size:13px;min-width:90px;">Seviye:</label>
+              <input type="range" id="newSkillLevel" min="0" max="100" value="60" style="flex:1;accent-color:var(--accent);" />
+              <span id="newSkillLevelValue" style="min-width:38px;text-align:right;font-weight:600;">60</span>
+            </div>
             <button class="btn-primary" id="addNewSkillBtn">➕ Beceri Ekle</button>
           </div>
           <div class="skills-list" id="skillsList" style="margin-top:14px;"></div>
@@ -492,8 +504,8 @@
           <div class="setting-row">
             <label>Başlangıçta otomatik seçilsin:</label>
             <select class="admin-input" id="defaultModel" style="max-width:260px;margin-bottom:0;">
-              <option value="flash">⚡ BilalAI 1.1 - Flash</option>
-              <option value="flashlite">⚡ BilalAI 1.0 - FlashLite</option>
+              <option value="flashlite">⚡ BilalAI - FlashLite - 1.0 (Önerilen)</option>
+              <option value="flash">⚡ BilalAI - Flash 1.1</option>
             </select>
           </div>
 

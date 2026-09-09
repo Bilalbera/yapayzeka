@@ -6,7 +6,7 @@
 (function (global) {
   'use strict';
 
-  const MODEL_NAME  = 'BilalAI 1.0 - FlashLite';
+  const MODEL_NAME  = 'BilalAI - FlashLite - 1.0';
   const THINKING_MS = [500, 1000];
 
   /* ===================== YARDIMCILAR ===================== */
@@ -342,16 +342,32 @@
         return liteCodeSample(lang);
       }
       default: {
-        // Konu bağlamı varsa (kısa soru) önceki konuya yönelik dön
         if (topic) {
           const topicShort = topic.length > 60 ? topic.slice(0, 60) + '...' : topic;
-          return 'Anladım, **"' + topicShort + '"** hakkında konuşuyoruz. 📌\nHangi detayı öğrenmek istersin? (nedir / nasıl / neden vs.)';
+          const options = [
+            'Anladım, **"' + topicShort + '"** hakkında konuşuyoruz. 📌\nHangi detayı öğrenmek istersin? (nedir / nasıl / neden)',
+            'Tamam, **' + topicShort + '** konusuna odaklandım. Ne öğrenmek / yapmak istiyorsun? 👇',
+            'Konu net: **' + topicShort + '**. Sorduğun detayı biraz daha açarsan daha iyi yardımcı olabilirim.'
+          ];
+          return pick(options);
+        }
+        const hasCodeHint = hasAny(t, ['nasıl', 'yaz', 'kod', 'örnek', 'fonksiyon', 'yapay zeka', 'ai', 'öğren']);
+        if (hasCodeHint) {
+          return 'Anladım! 📌 İstersen bir dil söyle (Python/JS/HTML vb.) ya da tam olarak ne yapmak istediğini yaz — en kısa şekilde kodunu hazırlayayım.';
+        }
+        const rawTrim = String(userMsg || '').trim();
+        if (rawTrim.length <= 40) {
+          const questionHint = rawTrim.includes('?') ? ' Bu soruyu biraz daha açabilir misin?' : '';
+          return pick([
+            'Anladım. ' + rawTrim + ' konusunu konuşuyoruz — ne tür bir cevap istiyorsun? (özet / detay / kod / öneri)' + questionHint,
+            'Tamam, hızlı bir özetleyeyim mi yoksa detaylı mı anlatayım? Yoksa örnek mi istiyorsun?' + questionHint,
+            '📌 ' + rawTrim + ' — 3 seçenek:\n1) Kısa cevap\n2) Detaylı açıklama\n3) Kod örneği\nHangisi?'
+          ]);
         }
         const defs = [
-          'Anladım. Bi\' daha açabilir misin? (Örn: "bana film öner", "python ile hello world yaz", "23*7 hesapla") 👇',
-          'Hızlı cevap: ne yapmak istediğini biraz daha detaylandırırsan yardımcı olayım! 😊',
-          'Aklımdaki konular: Kod • Hesap • Tavsiye • Sohbet. Hangisi?',
-          'BilalAI FlashLite ⚡ — Basit ve hızlı. Ne üzerinde dursak?'
+          'Anladım. Konuyu biraz daha netleştirirsen (örn: "python ile todo yaz", "bana film öner") anında cevap veririm 👇',
+          'Hızlı hazırım ⚡ — Kod, hesap, tavsiye, sohbet? Hangi başlık altında yardımcı olayım?',
+          'FlashLite 🟡 kısa ve öz durur. Uzun, detaylı analizler için ⚡ Flash 1.1 geçebilirsin, daha çok seçenek verir!'
         ];
         return pick(defs);
       }

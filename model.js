@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const MODEL_NAME = 'BilalAI 1.1 - Flash';
+  const MODEL_NAME = 'BilalAI - Flash 1.1';
   const MODEL_ICON = '⚡';
 
   /* ============== YARDIMCILAR ============== */
@@ -1279,6 +1279,56 @@ class _AnasayfaState extends State<Anasayfa> {
         `Tam metni atarsan baştan sona yeniden yazarım! 🚀`
       ].join('');
     }
+    if (t.startsWith('/explain')) {
+      const topic = t.replace(/^\/explain\s*/i, '').trim() || 'bir konu';
+      return [
+        `# 📚 "${topic}" Konusunu Adım Adım Açıklayalım\n\n`,
+        `## 1️⃣ Basit Tanım (ELI5: 5 yaşına anlat)\n`,
+        `"${topic}" en basit haliyle şu demektir: hayal et bu konu bir **makine**; senin için X işini yapıyor.\n\n`,
+        `## 2️⃣ Neden Var? / Faydası\n`,
+        `• Zamandan tasarruf\n• Hata oranını azalt\n• Karmaşık işi basitleştir\n\n`,
+        `## 3️⃣ Nasıl Çalışır? (Akış şeması)\n`,
+        `\`\`\`\n1. Girdi al → 2. Doğrula/kontrol et\n3. İşle (mantık / kural / AI)\n4. Sonuç üret → 5. Geri döndür\n\`\`\`\n\n`,
+        `## 4️⃣ Gerçek Hayattan Örnek\n`,
+        `Günlük hayatta sık karşılaşırsın: örneğin fatura ödeme ekranı aslında tam olarak bu adımları izler.\n\n`,
+        `## 5️⃣ Sık Yapılan Hatalar\n`,
+        `• Aşırı karmaşıklaştırmak\n• Temel amacı unutmak\n• Test etmeden canlıya almak\n\n`,
+        `İstersen belirli bir bölümünü daha da derinlemesine anlatayım veya uygulamalı örnek yapayım! 🚀`
+      ].join('');
+    }
+    if (t.startsWith('/summarize')) {
+      return [
+        `# 📝 Metin Özetleme Rehberi\n\n`,
+        `Metnini buraya yapıştır, 4 formatta özetleyeyim:\n\n`,
+        `**1. Ultra Kısa (1 cümle):** 280 karakter içinde öz.\n`,
+        `**2. Kısa (3 madde):** Maddeler halinde ana fikirler.\n`,
+        `**3. Detaylı (1 paragraf):** Bağlam + sonuç + çıkarım.\n`,
+        `**4. TikTok/Reels:** 15 saniyelik senaryo halinde.\n\n`,
+        `Metni yapıştır ve hangi formatı istediğini söyle (örn: "3 maddedeki özeti ver") ✨`
+      ].join('');
+    }
+    if (t.startsWith('/compare')) {
+      const topics = t.replace(/^\/compare\s*/i, '').trim() || 'A ve B';
+      const [a, b] = topics.split(/\s+(vs\.?|veya|ile|karşılaştır)\s+/i).filter(s => s && s.length > 1);
+      const A = (a || 'Seçenek A').trim();
+      const B = (b || 'Seçenek B').trim();
+      return [
+        `# ⚖️ Karşılaştırma: ${A} vs ${B}\n\n`,
+        `| Kriter            | ${A}                     | ${B}                     |\n`,
+        `|-------------------|--------------------------|--------------------------|\n`,
+        `| 🎯 Amacı          | Genellikle X için kullanılır | Genellikle Y için kullanılır |\n`,
+        `| ⚡ Hız            | Hızlı | Orta / Duruma göre |\n`,
+        `| 💰 Maliyet        | Düşük-orta | Yüksek-orta |\n`,
+        `| 🧠 Öğrenme Eğrisi | Kolay | Orta-Zor |\n`,
+        `| 🔒 Güvenlik       | Standart | Gelişmiş (isteğe bağlı) |\n`,
+        `| 📊 Ölçekleme      | Dikey | Yatay + dikey |\n\n`,
+        `## 🎯 Ne Zaman Hangisi?\n`,
+        `• **${A} →** Küçük ölçekli / hızlı başlangıç / prototip\n`,
+        `• **${B} →** Kurumsal / yüksek trafik / uzun soluklu\n\n`,
+        `**Karar:** İkisini de denemekten çekinme; 1 haftalık PoC çoğu zaman en doğru kararı verir.\n\n`,
+        `Daha spesifik bir kriter üzerinden karşılaştıray mı? (örn: sadece performans, sadece güvenlik) 🔍`
+      ].join('');
+    }
     if (t.startsWith('/debug')) {
       return [
         `# 🐞 Hata Ayıklama Rehberi\n\n`,
@@ -1298,17 +1348,25 @@ class _AnasayfaState extends State<Anasayfa> {
     if (t.startsWith('/help') || t.startsWith('/yardım')) {
       return [
         `# 📖 BilalAI Komutları & Kısayollar\n\n`,
-        `## Komutlar\n`,
-        `- \`/brainstorm konu\` → Yaratıcı fikirler, 5 yaklaşım + değerlendirme\n`,
-        `- \`/code-review\`     → Kod inceleme kriterleri\n`,
-        `- \`/content-enhance <metin>\` → İçerik iyileştirme taktikleri\n`,
-        `- \`/debug\`           → Sistematik hata ayıklama adımları\n`,
-        `- \`/help\` / \`/yardım\` → Bu liste\n\n`,
-        `## Kısayollar\n`,
-        `- \`Ctrl + Shift + A\` → Kurucu Paneli\n`,
-        `- \`Enter\`  → Gönder\n`,
+        `## 🚀 Komutlar\n`,
+        `- \`/brainstorm <konu>\`    → 5 farklı yaklaşımla beyin fırtınası\n`,
+        `- \`/explain <konu>\`      → Konuyu ELI5 + akış + örnekle açıkla\n`,
+        `- \`/compare A vs B\`      → Tablo halinde A vs B karşılaştırması\n`,
+        `- \`/summarize\`           → Metni 4 farklı formatta özetle\n`,
+        `- \`/code-review\`         → Kod inceleme kriterleri (6 kategori)\n`,
+        `- \`/content-enhance <m>\` → İçerik SEO+okunabilirlik iyileştirme\n`,
+        `- \`/debug\`               → Sistematik hata ayıklama adımları\n`,
+        `- \`/help\` / \`/yardım\`   → Bu liste\n\n`,
+        `## ⌨️ Kısayollar\n`,
+        `- \`Ctrl + Shift + A\` → Kurucu Kontrol Paneli\n`,
+        `- \`Enter\`  → Mesajı Gönder\n`,
         `- \`Shift + Enter\` → Yeni satır\n\n`,
-        `Ayrıca doğal sohbet: "23 * 7 kaç?", "bana film öner", "sıkıldım" gibi soruları anlarım! 🧠`
+        `## 💡 Doğal Sohbet Örnekleri\n`,
+        `• "Python ile todo listesi nasıl yapılır?"\n`,
+        `• "Bana 3 film öner (gerilim türünde)"\n`,
+        `• "23 * 47 + 15 kaç eder?"\n`,
+        `• "Sıkıldım, ne yapmalıyım?"\n\n`,
+        `Hazırım — ne yapalım bugün? 🧠⚡`
       ].join('');
     }
     return null;
