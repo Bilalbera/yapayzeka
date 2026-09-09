@@ -1,785 +1,528 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr" data-theme="dark">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>BilalAI — Blender Assistant</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
- 
-  :root {
-    --bg:          #0d0f14;
-    --surface:     #13161e;
-    --surface2:    #1a1e28;
-    --border:      #252a38;
-    --accent:      #e87c2e;
-    --accent-dim:  rgba(232, 124, 46, 0.12);
-    --accent-glow: rgba(232, 124, 46, 0.25);
-    --text:        #e8e9ed;
-    --text-muted:  #6b7280;
-    --text-dim:    #9ca3af;
-    --green:       #4ade80;
-    --red:         #f87171;
-    --code-bg:     #0a0c10;
-  }
- 
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
- 
-  body {
-    font-family: 'Syne', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    height: 100dvh;
-    display: grid;
-    grid-template-columns: 280px 1fr;
-    grid-template-rows: 1fr;
-    overflow: hidden;
-  }
- 
-  /* ── Sidebar ── */
-  .sidebar {
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    padding: 24px 20px;
-    gap: 24px;
-  }
- 
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
- 
-  .logo-mark {
-    width: 36px;
-    height: 36px;
-    background: var(--accent);
-    border-radius: 8px;
-    display: grid;
-    place-items: center;
-    flex-shrink: 0;
-  }
- 
-  .logo-mark svg { width: 20px; height: 20px; }
- 
-  .logo-text {
-    font-size: 20px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    line-height: 1;
-  }
- 
-  .logo-sub {
-    font-size: 10px;
-    font-weight: 400;
-    color: var(--text-muted);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-top: 3px;
-  }
- 
-  /* Blender status */
-  .blender-card {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-  }
- 
-  .blender-card-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-muted);
-    margin-bottom: 10px;
-  }
- 
-  .status-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 600;
-  }
- 
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    transition: background 0.3s;
-  }
-  .dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .dot.red   { background: var(--red);   box-shadow: 0 0 6px var(--red); }
-  .dot.pulse { animation: pulse 1.5s infinite; }
- 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.3; }
-  }
- 
-  .status-text { color: var(--text-dim); }
- 
-  .connect-btn {
-    margin-top: 10px;
-    width: 100%;
-    padding: 8px;
-    background: var(--accent-dim);
-    border: 1px solid var(--accent);
-    border-radius: 6px;
-    color: var(--accent);
-    font-family: 'Syne', sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
-    letter-spacing: 0.04em;
-  }
-  .connect-btn:hover { background: rgba(232,124,46,0.2); }
- 
-  /* Script preview panel */
-  .script-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
- 
-  .script-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
- 
-  .script-panel-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-muted);
-  }
- 
-  .copy-btn {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text-muted);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    padding: 3px 8px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
- 
-  .script-box {
-    flex: 1;
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow-y: auto;
-    padding: 12px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    line-height: 1.7;
-    color: #8b9dc3;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
- 
-  .script-placeholder {
-    color: var(--text-muted);
-    font-style: italic;
-    font-size: 11px;
-  }
- 
-  /* ── Main chat area ── */
-  .main {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
- 
-  /* Header */
-  .chat-header {
-    padding: 20px 28px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-  }
- 
-  .chat-title {
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: -0.3px;
-  }
- 
-  .chat-subtitle {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-weight: 400;
-    margin-top: 2px;
-  }
- 
-  .header-badge {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    padding: 4px 10px;
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    color: var(--text-muted);
-  }
- 
-  /* Messages */
-  .messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    scroll-behavior: smooth;
-  }
- 
-  .messages::-webkit-scrollbar { width: 4px; }
-  .messages::-webkit-scrollbar-track { background: transparent; }
-  .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
- 
-  /* Welcome screen */
-  .welcome {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
-    gap: 16px;
-    text-align: center;
-    opacity: 0.6;
-  }
- 
-  .welcome-icon {
-    width: 56px;
-    height: 56px;
-    background: var(--accent-dim);
-    border: 1px solid var(--accent);
-    border-radius: 14px;
-    display: grid;
-    place-items: center;
-  }
- 
-  .welcome-icon svg { width: 28px; height: 28px; color: var(--accent); }
- 
-  .welcome h2 {
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.4px;
-  }
- 
-  .welcome p {
-    font-size: 13px;
-    color: var(--text-muted);
-    max-width: 340px;
-    line-height: 1.6;
-  }
- 
-  .suggestions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    margin-top: 8px;
-  }
- 
-  .suggestion-chip {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 7px 14px;
-    font-size: 12px;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .suggestion-chip:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: var(--accent-dim);
-  }
- 
-  /* Message bubbles */
-  .message {
-    display: flex;
-    gap: 12px;
-    max-width: 800px;
-  }
- 
-  .message.user {
-    align-self: flex-end;
-    flex-direction: row-reverse;
-  }
- 
-  .avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    flex-shrink: 0;
-    display: grid;
-    place-items: center;
-    font-size: 13px;
-    font-weight: 700;
-  }
- 
-  .avatar.ai {
-    background: var(--accent);
-    color: #fff;
-  }
- 
-  .avatar.user {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-  }
- 
-  .bubble {
-    padding: 12px 16px;
-    border-radius: 12px;
-    font-size: 14px;
-    line-height: 1.6;
-    max-width: 540px;
-  }
- 
-  .bubble.ai {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-top-left-radius: 4px;
-  }
- 
-  .bubble.user {
-    background: var(--accent);
-    color: #fff;
-    border-top-right-radius: 4px;
-    font-weight: 500;
-  }
- 
-  .bubble-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 6px;
-  }
- 
-  .sent-badge {
-    font-size: 10px;
-    font-family: 'JetBrains Mono', monospace;
-    padding: 2px 7px;
-    border-radius: 10px;
-    font-weight: 500;
-  }
-  .sent-badge.ok  { background: rgba(74,222,128,0.12); color: var(--green); }
-  .sent-badge.err { background: rgba(248,113,113,0.12); color: var(--red); }
- 
-  .view-script-btn {
-    font-size: 10px;
-    font-family: 'JetBrains Mono', monospace;
-    padding: 2px 7px;
-    border-radius: 10px;
-    background: var(--accent-dim);
-    color: var(--accent);
-    border: none;
-    cursor: pointer;
-    font-weight: 500;
-  }
-  .view-script-btn:hover { background: rgba(232,124,46,0.25); }
- 
-  /* Typing indicator */
-  .typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 14px 16px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    border-top-left-radius: 4px;
-    width: fit-content;
-  }
- 
-  .typing-dot {
-    width: 6px;
-    height: 6px;
-    background: var(--text-muted);
-    border-radius: 50%;
-    animation: typing-bounce 1.2s infinite;
-  }
-  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
-  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
- 
-  @keyframes typing-bounce {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30%            { transform: translateY(-6px); opacity: 1; }
-  }
- 
-  /* Input area */
-  .input-area {
-    padding: 20px 28px;
-    border-top: 1px solid var(--border);
-    flex-shrink: 0;
-  }
- 
-  .input-row {
-    display: flex;
-    gap: 10px;
-    align-items: flex-end;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 10px 10px 10px 16px;
-    transition: border-color 0.2s;
-  }
- 
-  .input-row:focus-within { border-color: var(--accent); }
- 
-  textarea {
-    flex: 1;
-    background: none;
-    border: none;
-    outline: none;
-    color: var(--text);
-    font-family: 'Syne', sans-serif;
-    font-size: 14px;
-    resize: none;
-    line-height: 1.5;
-    min-height: 24px;
-    max-height: 140px;
-    overflow-y: auto;
-  }
- 
-  textarea::placeholder { color: var(--text-muted); }
- 
-  .send-btn {
-    width: 36px;
-    height: 36px;
-    background: var(--accent);
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    display: grid;
-    place-items: center;
-    flex-shrink: 0;
-    transition: background 0.15s, transform 0.1s;
-  }
-  .send-btn:hover   { background: #d4702a; }
-  .send-btn:active  { transform: scale(0.94); }
-  .send-btn:disabled { background: var(--surface); cursor: default; }
-  .send-btn svg { width: 16px; height: 16px; color: #fff; }
- 
-  .input-hint {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 8px;
-    text-align: center;
-  }
- 
-  /* Scrollbar for script box */
-  .script-box::-webkit-scrollbar { width: 3px; }
-  .script-box::-webkit-scrollbar-thumb { background: var(--border); }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BilalAI</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
- 
-<!-- ── Sidebar ── -->
-<aside class="sidebar">
-  <div class="logo">
-    <div class="logo-mark">
-      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M10 2L17 6V14L10 18L3 14V6L10 2Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
-        <path d="M10 2V18M3 6L17 14M17 6L3 14" stroke="white" stroke-width="1.2" opacity="0.5"/>
-      </svg>
-    </div>
-    <div>
-      <div class="logo-text">BilalAI</div>
-      <div class="logo-sub">Blender Assistant</div>
-    </div>
-  </div>
- 
-  <div class="blender-card">
-    <div class="blender-card-label">Blender Connection</div>
-    <div class="status-row">
-      <div class="dot red pulse" id="status-dot"></div>
-      <span class="status-text" id="status-text">Not connected</span>
-    </div>
-    <button class="connect-btn" id="check-btn" onclick="checkBlender()">Check Connection</button>
-  </div>
- 
-  <div class="script-panel">
-    <div class="script-panel-header">
-      <span class="script-panel-label">Last Script</span>
-      <button class="copy-btn" id="copy-btn" onclick="copyScript()">Copy</button>
-    </div>
-    <div class="script-box" id="script-box">
-      <span class="script-placeholder">Scripts generated by BilalAI will appear here.</span>
-    </div>
-  </div>
-</aside>
- 
-<!-- ── Main ── -->
-<main class="main">
-  <div class="chat-header">
-    <div>
-      <div class="chat-title">Ask BilalAI</div>
-      <div class="chat-subtitle">Describe a character, scene, or animation</div>
-    </div>
-    <div class="header-badge">claude-sonnet-4-6</div>
-  </div>
- 
-  <div class="messages" id="messages">
-    <div class="welcome" id="welcome">
-      <div class="welcome-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-        </svg>
+  <div class="app">
+
+    <!-- ════════ SIDEBAR ════════ -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <button class="btn-new-chat" id="newChatBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Yeni Sohbet
+        </button>
       </div>
-      <h2>What should we build?</h2>
-      <p>BilalAI translates your description into Blender Python and sends it straight to your viewport.</p>
-      <div class="suggestions">
-        <div class="suggestion-chip" onclick="suggest(this)">Low-poly robot character</div>
-        <div class="suggestion-chip" onclick="suggest(this)">Bouncing ball animation</div>
-        <div class="suggestion-chip" onclick="suggest(this)">Stylized mountain scene</div>
-        <div class="suggestion-chip" onclick="suggest(this)">Spinning logo with glow</div>
-        <div class="suggestion-chip" onclick="suggest(this)">Humanoid rig with walk cycle</div>
-        <div class="suggestion-chip" onclick="suggest(this)">Crystal cave with materials</div>
+      <div class="chat-list" id="chatList"></div>
+      <div class="sidebar-footer">
+        <button class="icon-btn" id="sidebarToggle" title="Kenar çubuğunu kapat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+        </button>
+        <button class="icon-btn" id="themeToggle" title="Temayı değiştir">
+          <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+          <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ════════ MAIN ════════ -->
+    <main class="main">
+
+      <!-- Header -->
+      <header class="header">
+        <button class="icon-btn mobile-only" id="openSidebarBtn" title="Menüyü aç">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+
+        <!-- Tıklanabilir Model Rozeti -->
+        <div class="model-badge clickable" id="modelBadgeBtn" title="Modeli değiştir">
+          <span class="badge-glow"></span>
+          <span class="spark" id="headerModelIcon">⚡</span>
+          <span class="badge-text" id="headerModelName">BilalAI 1.1 - Flash</span>
+          <svg class="badge-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </div>
+
+        <div class="header-actions">
+          <button class="icon-btn" id="clearChatBtn" title="Sohbeti temizle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+          <button class="secret-founder-btn" id="secretFounderBtn" title=""></button>
+        </div>
+      </header>
+
+      <!-- Mesajlar Alanı -->
+      <section class="messages" id="messages">
+
+        <!-- Welcome Screen -->
+        <div class="welcome-screen" id="welcomeScreen">
+          <div class="welcome-avatar">
+            <svg viewBox="0 0 64 64">
+              <defs>
+                <linearGradient id="welcomeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#00BFFF"/>
+                  <stop offset="100%" stop-color="#0066CC"/>
+                </linearGradient>
+              </defs>
+              <circle cx="32" cy="32" r="30" fill="url(#welcomeGrad)"/>
+              <text x="32" y="42" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#fff" text-anchor="middle">B</text>
+            </svg>
+          </div>
+          <h1 class="welcome-title">Merhaba, ben BilalAI <span style="color:#00BFFF">⚡ 1.1 Flash</span></h1>
+          <p class="welcome-sub">
+            Hızlı, yetkin ve kendi kendini geliştiren bir yapay zeka asistanıyım.<br/>
+            Basitten karmaşığa her seviyede kod, tasarım, planlama ve sohbet için hazırım.
+          </p>
+
+          <div class="welcome-categories">
+            <div class="welcome-category">
+              <h3 class="welcome-category-title"><span>🐍</span> Basit Kod Örnekleri</h3>
+              <div class="suggestion-chips">
+                <button class="chip chip-compact" data-suggest="Bana basit bir python kodu yaz. print('hello') gibi">
+                  <span class="chip-icon">📝</span>
+                  <span>Basit Python kodu<br/><small>print('Hello')</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="JavaScript ile basit bir hello world örneği yaz">
+                  <span class="chip-icon">📜</span>
+                  <span>Basit JS kodu<br/><small>console.log</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="Python ile faktöriyel hesaplayan fonksiyon yaz">
+                  <span class="chip-icon">🔢</span>
+                  <span>Faktöriyel (Python)<br/><small>Örnek fonksiyon</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="JavaScript ile fibonacci dizisi yaz">
+                  <span class="chip-icon">🔀</span>
+                  <span>Fibonacci (JS)<br/><small>Döngü örneği</small></span>
+                </button>
+              </div>
+            </div>
+
+            <div class="welcome-category">
+              <h3 class="welcome-category-title"><span>💻</span> Proje & Uygulama</h3>
+              <div class="suggestion-chips">
+                <button class="chip chip-compact" data-suggest="JavaScript ile modern bir todo uygulaması yaz">
+                  <span class="chip-icon">✅</span>
+                  <span>Todo uygulaması<br/><small>JavaScript + localStorage</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="React ile aranabilir filtreli liste bileşeni yaz">
+                  <span class="chip-icon">⚛️</span>
+                  <span>React Liste Bileşeni<br/><small>useState + useMemo</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="Modern glassmorphism kart tasarımı HTML ve CSS ile yap">
+                  <span class="chip-icon">🎨</span>
+                  <span>Glassmorphism Kart<br/><small>HTML + CSS</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="SQL ile kullanıcı sipariş sistemi ve rapor sorgusu yaz">
+                  <span class="chip-icon">🗃️</span>
+                  <span>SQL Şema + Sorgu<br/><small>Kullanıcı & Sipariş</small></span>
+                </button>
+              </div>
+            </div>
+
+            <div class="welcome-category">
+              <h3 class="welcome-category-title"><span>✨</span> Genel & Eğlence</h3>
+              <div class="suggestion-chips">
+                <button class="chip chip-compact" data-suggest="Bana bilim kurgu filmi öner">
+                  <span class="chip-icon">🎬</span>
+                  <span>Film önerisi al<br/><small>Bilim kurgu</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="Python nedir, nasıl kurulur, ilk program nasıl yazılır">
+                  <span class="chip-icon">🐍</span>
+                  <span>Python öğrenmeye başla<br/><small>Adım adım rehber</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="Şu an saat kaç, nasılsın">
+                  <span class="chip-icon">⚡</span>
+                  <span>Günlük sohbet<br/><small>Selamlaşma</small></span>
+                </button>
+                <button class="chip chip-compact" data-suggest="Bana espri yap">
+                  <span class="chip-icon">😄</span>
+                  <span>Şaka / Espri<br/><small>Yazılım temalı</small></span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Input Alanı -->
+      <div class="input-wrapper">
+        <div class="input-toolbar" id="inputToolbar">
+          <button type="button" class="input-toolbar-btn" data-quick="python-hello" title="Basit Python kodu">
+            🐍 Python
+          </button>
+          <button type="button" class="input-toolbar-btn" data-quick="js-hello" title="Basit JS kodu">
+            📜 JS
+          </button>
+          <button type="button" class="input-toolbar-btn" data-quick="python-factorial" title="Python faktöriyel">
+            🔢 Faktöriyel
+          </button>
+          <button type="button" class="input-toolbar-btn" data-quick="js-fibonacci" title="JS Fibonacci">
+            🔀 Fibonacci
+          </button>
+          <button type="button" class="input-toolbar-btn" data-quick="js-todo" title="Todo uygulaması">
+            ✅ Todo App
+          </button>
+          <button type="button" class="input-toolbar-btn" data-quick="movie-suggest" title="Film önerisi">
+            🎬 Film
+          </button>
+          <button type="button" class="input-toolbar-btn" data-quick="joke" title="Şaka yap">
+            😄 Espri
+          </button>
+          <button type="button" class="input-toolbar-btn" data-quick="slash-help" title="Komut listesi">
+            📖 /help
+          </button>
+        </div>
+        <div class="input-container">
+          <textarea
+            id="messageInput"
+            class="message-input"
+            rows="1"
+            placeholder="BilalAI'ya bir mesaj yaz… (Enter gönder, Shift+Enter yeni satır)"
+          ></textarea>
+          <button class="send-btn" id="sendBtn" title="Gönder">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          </button>
+        </div>
+        <p class="input-disclaimer">
+          ⚡ Yanıtlar model.js tarafından üretilir · %100 istemci tarafı · Verileriniz tarayıcınızda saklanır
+        </p>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ════════ MODEL SEÇİCİ MODAL ════════ -->
+  <div class="model-modal-overlay" id="modelModal">
+    <div class="model-modal" role="dialog" aria-modal="true" aria-labelledby="modelModalTitle">
+      <div class="model-modal-header">
+        <h3 id="modelModalTitle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"></path></svg>
+          Model Seç
+        </h3>
+        <button class="icon-btn" id="closeModelModal" title="Kapat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <div class="model-list">
+
+        <!-- FlashLite Model Kartı (Önerilen - ÜSTTE) -->
+        <div class="model-card" data-model="flashlite">
+          <div class="model-card-icon-wrap" style="background: linear-gradient(135deg, rgba(245,158,11,0.22), rgba(217,119,6,0.10));">
+            <span class="model-card-icon" style="color:#F59E0B;">⚡</span>
+          </div>
+          <div class="model-card-info">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <div class="model-card-name">BilalAI - FlashLite - 1.0</div>
+              <span class="model-recommended-badge">⭐ Önerilen · Hızlı Başlangıç</span>
+            </div>
+            <div class="model-card-desc">
+              Ultra hızlı, kısa ve öz cevaplar. Anında sohbet, basit kod örnekleri ve
+              günlük sorular için optimize edilmiştir. Daha az detay, daha çok hız. Düşünme süresi: <strong>0.5 - 1.0 sn</strong>
+            </div>
+            <div class="model-card-tags">
+              <span class="model-tag tag-ultra">Ultra Hızlı</span>
+              <span class="model-tag tag-light">Hafif</span>
+              <span class="model-tag tag-code">Basit Kod</span>
+              <span class="model-tag tag-chat">Sohbet</span>
+            </div>
+          </div>
+          <div class="model-card-check">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </div>
+        </div>
+
+        <!-- Flash Model Kartı (Altta) -->
+        <div class="model-card active" data-model="flash">
+          <div class="model-card-icon-wrap" style="background: linear-gradient(135deg, rgba(0,191,255,0.18), rgba(0,102,204,0.10));">
+            <span class="model-card-icon">⚡</span>
+          </div>
+          <div class="model-card-info">
+            <div class="model-card-name">BilalAI 1.1 - Flash</div>
+            <div class="model-card-desc">
+              Hızlı, dengeli ve çok yönlü. Basitten karmaşığa her seviyede kod üretimi, günlük sohbet,
+              tasarım önerileri, içerik geliştirme ve genel amaçlı sorular için en ideal seçim. Düşünme süresi: <strong>0.7 - 1.5 sn</strong>
+            </div>
+            <div class="model-card-tags">
+              <span class="model-tag tag-speed">Hızlı</span>
+              <span class="model-tag tag-code">Kod</span>
+              <span class="model-tag tag-creative">Yaratıcı</span>
+              <span class="model-tag tag-chat">Sohbet</span>
+            </div>
+          </div>
+          <div class="model-card-check">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="model-modal-footer">
+        <div class="model-hint-card">
+          <span class="hint-icon">🔮</span>
+          <div>
+            <div class="hint-title">Yeni modeller geliyor!</div>
+            <div class="hint-desc">CodeMaster, DeepThink, Creative ve daha fazlası. Söyledikçe ekleriz. 😊</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
- 
-  <div class="input-area">
-    <div class="input-row">
-      <textarea
-        id="input"
-        rows="1"
-        placeholder="Describe a character, scene, or animation..."
-        onkeydown="handleKey(event)"
-        oninput="autoResize(this)"
-      ></textarea>
-      <button class="send-btn" id="send-btn" onclick="send()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-        </svg>
-      </button>
+
+  <!-- ════════ ADMİN / KURUCU PANELİ MODAL ════════ -->
+  <div class="modal-overlay" id="adminModal">
+    <div class="modal">
+
+      <!-- Admin Login -->
+      <div class="admin-login" id="adminLogin">
+        <div style="font-size:48px;margin-bottom:10px;">🔐</div>
+        <h2 class="admin-title">Kurucu Paneli</h2>
+        <p class="admin-sub">Giriş yapmak için kurucu parolasını girin.</p>
+        <input type="password" class="admin-input" id="founderPassword" placeholder="Kurucu parolası" autocomplete="off" />
+        <button class="btn-primary" id="adminLoginBtn">Giriş Yap</button>
+        <button class="btn-ghost" id="adminCloseBtn" style="margin-top:10px;">İptal</button>
+      </div>
+
+      <!-- Admin Panel İçeriği (başlangıçta gizli) -->
+      <div class="admin-panel hidden" id="adminPanel">
+        <div class="admin-panel-header">
+          <h2 style="display:flex;align-items:center;gap:8px;margin:0;font-size:18px;">
+            <span>👑</span> Kurucu Kontrol Paneli
+          </h2>
+          <button class="icon-btn" id="adminClosePanelBtn" title="Kapat">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+
+        <!-- Admin Tabs (8 sekme) -->
+        <div class="admin-tabs">
+          <button class="admin-tab active" data-tab="dashboard">📊 Genel Bakış</button>
+          <button class="admin-tab" data-tab="performance">⚡ Performans</button>
+          <button class="admin-tab" data-tab="models">🧩 Modeller</button>
+          <button class="admin-tab" data-tab="chats">💬 Sohbetler</button>
+          <button class="admin-tab" data-tab="skills">🧠 Beceriler</button>
+          <button class="admin-tab" data-tab="errors">🐞 Hata Günlüğü</button>
+          <button class="admin-tab" data-tab="system">📢 Sistem</button>
+          <button class="admin-tab" data-tab="settings">⚙️ Ayarlar</button>
+        </div>
+
+        <!-- Tab 1: Genel Bakış (Dashboard) -->
+        <div class="admin-tab-content active" data-content="dashboard">
+          <div class="kpi-grid">
+            <div class="kpi-card kpi-blue">
+              <div class="kpi-icon">💬</div>
+              <div class="kpi-body">
+                <div class="kpi-value" id="dashChats">0</div>
+                <div class="kpi-label">Toplam Sohbet</div>
+              </div>
+            </div>
+            <div class="kpi-card kpi-green">
+              <div class="kpi-icon">✉️</div>
+              <div class="kpi-body">
+                <div class="kpi-value" id="dashMessages">0</div>
+                <div class="kpi-label">Toplam Mesaj</div>
+              </div>
+            </div>
+            <div class="kpi-card kpi-amber">
+              <div class="kpi-icon">⚡</div>
+              <div class="kpi-body">
+                <div class="kpi-value" id="dashActiveModel">-</div>
+                <div class="kpi-label">Aktif Model</div>
+              </div>
+            </div>
+            <div class="kpi-card kpi-purple">
+              <div class="kpi-icon">👍</div>
+              <div class="kpi-body">
+                <div class="kpi-value" id="dashLikes">0</div>
+                <div class="kpi-label">Toplam Beğeni</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dashboard-row">
+            <div class="dashboard-card">
+              <h3 class="sub-title" style="margin-top:0;">📅 Son 7 Gün Mesaj Grafiği</h3>
+              <div class="bar-chart" id="dashBarChart">
+                <div class="bar-chart-empty">Henüz veri yok.</div>
+              </div>
+            </div>
+            <div class="dashboard-card">
+              <h3 class="sub-title" style="margin-top:0;">🔥 En Çok Kullanılan 5 Beceri</h3>
+              <div class="skills-list mini" id="dashTopSkills">
+                <p class="empty-state">Henüz beceri verisi yok.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dashboard-card" style="margin-top:16px;">
+            <h3 class="sub-title" style="margin-top:0;">🕓 Son İşlemler</h3>
+            <div id="dashActivity" class="activity-feed">
+              <p class="empty-state">Henüz işlem yok — sohbete başlayın.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Performans -->
+        <div class="admin-tab-content" data-content="performance">
+          <div class="performance-wrap">
+            <div class="perf-gauge">
+              <svg class="gauge-svg" viewBox="0 0 200 200">
+                <circle class="gauge-bg" cx="100" cy="100" r="85" stroke-width="18" fill="none"/>
+                <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="85" stroke-width="18" fill="none"
+                        stroke-dasharray="534" stroke-dashoffset="534" transform="rotate(-90 100 100)"/>
+              </svg>
+              <div class="perf-score" id="perfScore">0</div>
+              <div class="perf-label">Performans Puanı</div>
+            </div>
+            <div class="perf-details">
+              <div class="perf-row"><span>Toplam Beğeni</span><strong id="totalLikes">0</strong></div>
+              <div class="perf-row"><span>Toplam Beğenmeme</span><strong id="totalDislikes">0</strong></div>
+              <div class="perf-row"><span>Başarı Oranı</span><strong id="successRate">%0</strong></div>
+              <div class="perf-row"><span>Gönderilen Mesaj</span><strong id="totalMessages">0</strong></div>
+              <div class="perf-row"><span>Toplam Sohbet</span><strong id="totalChats">0</strong></div>
+              <div class="perf-row"><span>Ortalama Beceri Seviyesi</span><strong id="avgSkillLevel">0</strong></div>
+              <div class="perf-row" style="padding-top:8px;border-top:1px dashed var(--border);">
+                <button class="btn-secondary" id="boostPerfBtn">✨ Performansı %10 Arttır (Simülasyon)</button>
+              </div>
+              <div class="perf-row">
+                <button class="btn-secondary" id="resetSkillsPerfBtn">🔄 Becerileri Sıfırla</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Modeller -->
+        <div class="admin-tab-content" data-content="models">
+          <div id="modelsList" class="models-admin-list"></div>
+          <div class="sub-title" style="margin-top:22px;">➕ Yeni Model Ekle</div>
+          <div class="model-add-form">
+            <input type="text" class="admin-input" id="newModelName" placeholder="Model adı (örn: DeepThink 1.0)" />
+            <textarea class="admin-textarea" id="newModelDesc" placeholder="Model kısa açıklaması..." rows="2"></textarea>
+            <button class="btn-primary" id="addNewModelBtn">💾 Modeli Kaydet</button>
+          </div>
+        </div>
+
+        <!-- Tab 4: Sohbetler -->
+        <div class="admin-tab-content" data-content="chats">
+          <div class="admin-chats-header">
+            <label class="select-all-wrap" title="Tüm sohbetleri seç">
+              <input type="checkbox" id="selectAllChats" />
+              <span>Tümünü Seç</span>
+            </label>
+            <input type="text" class="admin-input" id="chatSearch" placeholder="Sohbetlerde ara…" style="margin-bottom:0;max-width:320px;" />
+            <select class="admin-input" id="chatSortBy" style="max-width:220px;margin-bottom:0;">
+              <option value="updated">Son güncelleme</option>
+              <option value="created">Oluşturma</option>
+              <option value="likes">Beğeni sayısı</option>
+              <option value="name">Alfabetik</option>
+            </select>
+          </div>
+          <div class="admin-chats-list" id="adminChatsList"></div>
+          <div style="margin-top:12px;">
+            <span id="selectedChatsCount" style="margin-right:12px;color:var(--text-secondary);font-size:13px;">0 sohbet seçildi</span>
+            <button class="btn-secondary" id="exportSelectedChatsBtn">📥 İşaretli Olanları JSON İndir</button>
+            <button class="btn-danger" id="deleteSelectedChatsBtn" style="margin-left:8px;">🗑️ İşaretli Olanları Sil</button>
+          </div>
+        </div>
+
+        <!-- Tab 5: Beceriler -->
+        <div class="admin-tab-content" data-content="skills">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+            <button class="btn-secondary" id="trainSkillsBtn">🎲 Tüm Becerileri Rastgele Eğit</button>
+            <button class="btn-secondary" id="resetSkillsBtn">🔄 Becerileri Sıfırla</button>
+          </div>
+          <div class="sub-title" style="margin-top:4px;">➕ Yeni Beceri Ekle</div>
+          <div class="skill-add-form">
+            <input type="text" class="admin-input" id="newSkillName" placeholder="Beceri adı (örn: REST API)" />
+            <button class="btn-primary" id="addNewSkillBtn">➕ Beceri Ekle</button>
+          </div>
+          <div class="skills-list" id="skillsList" style="margin-top:14px;"></div>
+        </div>
+
+        <!-- Tab 6: Hata Günlüğü -->
+        <div class="admin-tab-content" data-content="errors">
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+            <select class="admin-input" id="errFilter" style="max-width:220px;margin-bottom:0;">
+              <option value="all">Tüm zamanlar</option>
+              <option value="day">Son 24 saat</option>
+              <option value="week">Son 7 gün</option>
+            </select>
+            <button class="btn-danger" id="clearErrorsBtn">🧹 Tüm Hataları Temizle</button>
+          </div>
+          <div class="error-log-list" id="errorLogList"></div>
+        </div>
+
+        <!-- Tab 7: Sistem Mesajları -->
+        <div class="admin-tab-content" data-content="system">
+          <div class="system-msg-area">
+            <label class="field-label">Sohbete Sistem Mesajı Gönder (Kurucu)</label>
+            <textarea class="admin-textarea" id="systemMsgInput" rows="3" placeholder="Sistem mesajını yaz… ( tüm kullanıcılara görünecek )"></textarea>
+            <button class="btn-primary" id="sendSystemMsgBtn">📢 Mesajı Yayınla</button>
+          </div>
+          <div class="sub-title">ℹ️ Uygulama Bilgileri</div>
+          <ul class="app-info-list" id="dashAppInfo"></ul>
+          <div class="system-msg-history" style="margin-top:16px;">
+            <div class="sub-title">Geçmiş Sistem Mesajları</div>
+            <div class="sys-msg-list" id="systemMsgHistory"></div>
+          </div>
+        </div>
+
+        <!-- Tab 8: Ayarlar -->
+        <div class="admin-tab-content" data-content="settings">
+          <div class="settings-actions">
+            <button class="btn-secondary" id="exportJsonBtn">📥 Tüm Veriyi JSON Olarak İndir</button>
+            <button class="btn-secondary" id="exportTxtBtn">📄 Sohbetleri TXT Olarak İndir</button>
+          </div>
+
+          <div class="sub-title">🎨 Görsel Ayarlar</div>
+          <div class="setting-row">
+            <label>Ana vurgu rengi:</label>
+            <input type="color" id="accentColor" value="#00BFFF" />
+          </div>
+          <div class="setting-row">
+            <label>Welcome ekranını göster:</label>
+            <label class="switch"><input type="checkbox" id="showWelcome" checked /><span class="slider"></span></label>
+          </div>
+
+          <div class="sub-title" style="margin-top:12px;">🤖 Varsayılan Model</div>
+          <div class="setting-row">
+            <label>Başlangıçta otomatik seçilsin:</label>
+            <select class="admin-input" id="defaultModel" style="max-width:260px;margin-bottom:0;">
+              <option value="flash">⚡ BilalAI 1.1 - Flash</option>
+              <option value="flashlite">⚡ BilalAI 1.0 - FlashLite</option>
+            </select>
+          </div>
+
+          <div class="danger-zone">
+            <div class="sub-title" style="color:#f87171;">⚠️ TEHLİKELİ BÖLGE</div>
+            <button class="btn-danger" id="resetMemoryBtn">🗑️ TÜM Hafızayı / Veriyi Sıfırla</button>
+            <div style="margin-top:10px;">
+              <label class="field-label">Kurucu Parolasını Değiştir</label>
+              <input type="password" class="admin-input" id="oldPass" placeholder="Mevcut parola" />
+              <input type="password" class="admin-input" id="newPass" placeholder="Yeni parola" />
+              <input type="password" class="admin-input" id="newPass2" placeholder="Yeni parola (tekrar)" />
+              <button class="btn-secondary" id="changePassBtn">🔑 Parolayı Güncelle</button>
+            </div>
+          </div>
+
+          <div class="sub-title">Depolama Bilgisi</div>
+          <ul class="storage-info" id="storageInfo"></ul>
+        </div>
+
+      </div>
     </div>
-    <div class="input-hint">Connected to Blender on localhost:9001 · Powered by Claude</div>
   </div>
-</main>
- 
-<script>
-  const API_BASE   = 'http://localhost:8000';
-  let   history    = [];
-  let   lastScript = null;
-  let   sending    = false;
- 
-  // ── Auto-resize textarea ───────────────────────────────────────────────────
-  function autoResize(el) {
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
-  }
- 
-  // ── Suggestion chips ───────────────────────────────────────────────────────
-  function suggest(el) {
-    document.getElementById('input').value = el.textContent;
-    autoResize(document.getElementById('input'));
-    send();
-  }
- 
-  // ── Blender health check ───────────────────────────────────────────────────
-  async function checkBlender() {
-    const dot  = document.getElementById('status-dot');
-    const text = document.getElementById('status-text');
-    dot.className = 'dot red pulse';
-    text.textContent = 'Checking...';
- 
-    try {
-      const r = await fetch(`${API_BASE}/blender/status`);
-      const d = await r.json();
-      if (d.connected) {
-        dot.className = 'dot green';
-        text.textContent = 'Connected :9001';
-      } else {
-        dot.className = 'dot red';
-        text.textContent = 'Blender not found';
-      }
-    } catch {
-      dot.className = 'dot red';
-      text.textContent = 'Backend offline';
-    }
-  }
- 
-  // ── Copy script ────────────────────────────────────────────────────────────
-  async function copyScript() {
-    if (!lastScript) return;
-    await navigator.clipboard.writeText(lastScript);
-    const btn = document.getElementById('copy-btn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = 'Copy', 1500);
-  }
- 
-  // ── Keyboard shortcut ──────────────────────────────────────────────────────
-  function handleKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
-  }
- 
-  // ── Render helpers ─────────────────────────────────────────────────────────
-  function appendMessage(role, content, meta = null) {
-    const welcome = document.getElementById('welcome');
-    if (welcome) welcome.remove();
- 
-    const msgs = document.getElementById('messages');
- 
-    const wrap   = document.createElement('div');
-    wrap.className = `message ${role}`;
- 
-    const avatar = document.createElement('div');
-    avatar.className = `avatar ${role}`;
-    avatar.textContent = role === 'ai' ? 'B' : 'U';
- 
-    const bubble = document.createElement('div');
-    bubble.className = `bubble ${role}`;
-    bubble.textContent = content;
- 
-    if (meta && role === 'ai') {
-      const metaRow = document.createElement('div');
-      metaRow.className = 'bubble-meta';
- 
-      if (meta.blender_ok === true) {
-        const badge = document.createElement('span');
-        badge.className = 'sent-badge ok';
-        badge.textContent = '✓ Sent to Blender';
-        metaRow.appendChild(badge);
-      } else if (meta.blender_ok === false) {
-        const badge = document.createElement('span');
-        badge.className = 'sent-badge err';
-        badge.textContent = '✗ Blender offline';
-        metaRow.appendChild(badge);
-      }
- 
-      if (meta.script) {
-        const viewBtn = document.createElement('button');
-        viewBtn.className = 'view-script-btn';
-        viewBtn.textContent = 'View script';
-        viewBtn.onclick = () => showScript(meta.script);
-        metaRow.appendChild(viewBtn);
-      }
- 
-      bubble.appendChild(metaRow);
-    }
- 
-    wrap.appendChild(avatar);
-    wrap.appendChild(bubble);
-    msgs.appendChild(wrap);
-    msgs.scrollTop = msgs.scrollHeight;
- 
-    return wrap;
-  }
- 
-  function appendTyping() {
-    const msgs = document.getElementById('messages');
- 
-    const wrap   = document.createElement('div');
-    wrap.className = 'message ai';
-    wrap.id = 'typing-indicator';
- 
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar ai';
-    avatar.textContent = 'B';
- 
-    const typing = document.createElement('div');
-    typing.className = 'typing';
-    [0,1,2].forEach(() => {
-      const d = document.createElement('div');
-      d.className = 'typing-dot';
-      typing.appendChild(d);
-    });
- 
-    wrap.appendChild(avatar);
-    wrap.appendChild(typing);
-    msgs.appendChild(wrap);
-    msgs.scrollTop = msgs.scrollHeight;
-  }
- 
-  function removeTyping() {
-    document.getElementById('typing-indicator')?.remove();
-  }
- 
-  function showScript(script) {
-    lastScript = script;
-    const box = document.getElementById('script-box');
-    box.textContent = script;
-  }
- 
-  // ── Main send ──────────────────────────────────────────────────────────────
-  async function send() {
-    if (sending) return;
-    const input = document.getElementById('input');
-    const text  = input.value.trim();
-    if (!text) return;
- 
-    sending = true;
-    document.getElementById('send-btn').disabled = true;
-    input.value = '';
-    input.style.height = 'auto';
- 
-    appendMessage('user', text);
-    history.push({ role: 'user', content: text });
- 
-    appendTyping();
- 
-    try {
-      const resp = await fetch(`${API_BASE}/chat`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ messages: history, send_to_blender: true }),
-      });
- 
-      if (!resp.ok) throw new Error(`Server error ${resp.status}`);
-      const data = await resp.json();
- 
-      removeTyping();
-      appendMessage('ai', data.reply, { blender_ok: data.blender_ok, script: data.script });
-      history.push({ role: 'assistant', content: data.reply });
- 
-      if (data.script) showScript(data.script);
- 
-      // Refresh connection status
-      if (data.blender_ok !== null) {
-        const dot  = document.getElementById('status-dot');
-        const text = document.getElementById('status-text');
-        if (data.blender_ok) {
-          dot.className  = 'dot green';
-          text.textContent = 'Connected :9001';
-        } else {
-          dot.className  = 'dot red';
-          text.textContent = 'Blender not found';
-        }
-      }
- 
-    } catch (err) {
-      removeTyping();
-      appendMessage('ai', `Connection error: ${err.message}. Is the backend running on port 8000?`);
-    }
- 
-    sending = false;
-    document.getElementById('send-btn').disabled = false;
-    input.focus();
-  }
- 
-  // Initial connection check
-  checkBlender();
-</script>
+
+  <!-- ════════ TOAST ════════ -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Scriptler (sıra önemli: önce model, sonra ana uygulama) -->
+  <script src="model.js"></script>
+  <script src="flashlitemodel.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
