@@ -1,94 +1,64 @@
-/* =========================================================
-   ai-enhancements.js | BilalAI modelleri için kalite katmanı
-   Bu dosya model.js ve flashlitemodel.js sonrasında yüklenmelidir.
-   ========================================================= */
+/* BilalAI Pro çalışma zamanı entegrasyonu.
+   script.js içindeki kapalı MODELS nesnesine dokunmadan Pro'yu bağlar. */
 (function (global) {
   'use strict';
-
   const SETTINGS_KEY = 'bilalai_settings';
   const PRO_KEY = 'pro';
-  const PRO_DELAY = [5000, 7500];
-  const ORIGINAL_ENGINE = global.BilalAIResponseEngine;
-  const PRO_ENGINE = global.BilalAIPro;
+  const PRO_DELAY_MIN = 5000;
+  const PRO_DELAY_MAX = 7500;
+  const originalSetTimeout = global.setTimeout.bind(global);
 
-  function settings() {
-    try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); }
+  function getSettings() {
+    try { return JSON.parse(global.localStorage.getItem(SETTINGS_KEY) || '{}'); }
     catch (_) { return {}; }
   }
-
-  function isPro() { return settings().currentModel === PRO_KEY; }
-
-  function normalizeContext(context) {
-    return Array.isArray(context) ? context.slice(-12) : [];
+  function isPro() { return getSettings().currentModel === PRO_KEY; }
+  function saveProSelection() {
+    const settings = getSettings();
+    settings.currentModel = PRO_KEY;
+    try { global.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (_) {}
+    const name = document.getElementById('headerModelName');
+    const icon = document.getElementById('headerModelIcon');
+    if (name) name.textContent = 'BilalAI - Pro 1.1';
+    if (icon) icon.textContent = '🧠';
+    document.querySelectorAll('.model-card').forEach(card => card.classList.toggle('active', card.dataset.model === PRO_KEY));
   }
 
-  // Flash motorunun genel ve tekrarlı cevaplarını daha uygulanabilir hale getirir.
-  function improveFlashAnswer(answer, prompt) {
-    const text = String(answer || '').trim();
-    if (!text) return 'İsteğini anlayamadım. Hedefini ve beklediğin çıktı biçimini yazar mısın?';
-    if (text.includes('```') || /^#{1,3}\s/m.test(text)) return text;
+  // script.js modeli tanımadığı için model kartına basıldığında seçim ayarını sonradan sabitler.
+  document.addEventListener('click', event => {
+    if (event.target.closest('.model-card[data-model="pro"]')) saveProSelection();
+  });
 
-    const q = String(prompt || '').toLocaleLowerCase('tr-TR');
-    const technical = /(kod|hata|javascript|typescript|python|react|sql|api|uygulama|proje)/i.test(q);
-    if (!technical || text.length > 260) return text;
+  // Pro seçiliyken mesaj yanıtının gecikmesini 5.0–7.5 saniyeye taşır.
+  global.setTimeout = function (callback, delay, ...args) {
+    if (isPro() && typeof callback === 'function' && Number(delay) >= 500 && Number(delay) <= 2000) {
+      delay = Math.floor(Math.random() * (PRO_DELAY_MAX - PRO_DELAY_MIN + 1)) + PRO_DELAY_MIN;
+    }
+    return originalSetTimeout(callback, delay, ...args);
+  };
 
-    return `${text}\n\n**Daha iyi sonuç için:** Beklenen çıktı, kullandığın teknoloji ve varsa hata mesajını belirtirsen çözümü doğrudan uygulanabilir şekilde netleştirebilirim.`;
-  }
-
-  if (ORIGINAL_ENGINE && typeof ORIGINAL_ENGINE.generate === 'function') {
-    const originalGenerate = ORIGINAL_ENGINE.generate.bind(ORIGINAL_ENGINE);
-    const wrapped = {
-      MODEL: ORIGINAL_ENGINE.MODEL,
-      generate(prompt, context) {
-        if (isPro() && PRO_ENGINE && typeof PRO_ENGINE.generate === 'function') {
-          return PRO_ENGINE.generate(prompt, normalizeContext(context));
-        }
-        return improveFlashAnswer(originalGenerate(prompt, normalizeContext(context)), prompt);
-      }
-    };
-    global.BilalAIResponseEngine = wrapped;
-  }
-
-  // Mevcut script.js modeli tanımıyor olsa bile Pro seçimini mümkün kılmak için
-  // model seçiciye kart ekler ve ayarı doğrudan kaydeder.
-  function installProCard() {
+  function addCard() {
     const list = document.querySelector('.model-list');
     if (!list || list.querySelector('[data-model="pro"]')) return;
     const card = document.createElement('div');
     card.className = 'model-card';
     card.dataset.model = PRO_KEY;
     card.innerHTML = `
-      <div class="model-card-icon-wrap" style="background:linear-gradient(135deg,rgba(139,92,246,.25),rgba(109,40,217,.12));">
-        <span class="model-card-icon" style="color:#A78BFA">🧠</span>
+      <div class="model-card-icon-wrap" style="background:linear-gradient(135deg,rgba(139,92,246,.28),rgba(109,40,217,.12));">
+        <span class="model-card-icon" style="color:#A78BFA;">🧠</span>
       </div>
       <div class="model-card-info">
-        <div class="model-card-name">BilalAI - Pro 1.0</div>
-        <div class="model-card-desc">Karmaşık kod, planlama, hata analizi ve karar desteği için daha kontrollü yanıtlar. Düşünme süresi: <strong>5.0 - 7.5 sn</strong></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <div class="model-card-name">BilalAI - Pro 1.1</div>
+          <span class="model-recommended-badge">🧠 Derin Analiz</span>
+        </div>
+        <div class="model-card-desc">Karmaşık kod, hata analizi, proje planlama ve karar desteği için kontrollü yanıtlar. Son 12 mesajı bağlam olarak kullanır. Düşünme süresi: <strong>5.0 - 7.5 sn</strong></div>
         <div class="model-card-tags"><span class="model-tag tag-creative">Derin Analiz</span><span class="model-tag tag-code">Kod</span><span class="model-tag tag-chat">Bağlam</span></div>
       </div>
       <div class="model-card-check">✓</div>`;
     list.appendChild(card);
   }
 
-  function bindProSelection() {
-    document.addEventListener('click', event => {
-      const card = event.target.closest('.model-card[data-model="pro"]');
-      if (!card) return;
-      const value = settings();
-      value.currentModel = PRO_KEY;
-      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(value)); } catch (_) {}
-      document.querySelectorAll('.model-card').forEach(item => item.classList.toggle('active', item === card));
-      const name = document.querySelector('#headerModelName');
-      const icon = document.querySelector('#headerModelIcon');
-      if (name) name.textContent = 'BilalAI - Pro 1.0';
-      if (icon) icon.textContent = '🧠';
-    });
-  }
-
-  function boot() {
-    installProCard();
-    bindProSelection();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addCard);
+  else addCard();
 })(typeof window !== 'undefined' ? window : globalThis);
