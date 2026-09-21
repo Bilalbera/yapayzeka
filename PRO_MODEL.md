@@ -1,22 +1,15 @@
-# BilalAI Pro modeli
+# BilalAI Pro entegrasyonu
 
-BilalAI Pro, istemci tarafındaki mevcut yanıt motorunu daha geniş bağlam ve daha ayrıntılı kalite kontrolüyle çalıştırır.
+`pro-model.js` Pro yanıt motorunu, `ai-enhancements.js` ise mevcut uygulamadaki modelleri bağlayan kalite katmanını içerir.
 
-- Düşünme süresi: **5.0–7.5 saniye**
-- Bağlam: son **12** mesaj
-- Teknik, planlama ve karar istekleri için ek kalite kontrolü
-- Ağ bağlantısı veya harici API gerektirmez
+`index.html` içindeki script sırası şu şekilde olmalıdır:
 
-`pro-model.js`, `model.js` ve `flashlitemodel.js` ile birlikte yüklenmelidir. Uygulama entegrasyonunda model kaydı şu özelliklerle eklenmelidir:
-
-```js
-pro: {
-  name: 'BilalAI - Pro 1.0',
-  shortName: 'Pro',
-  icon: '🧠',
-  color: '#8B5CF6',
-  thinkingMs: [5000, 7500],
-  style: 'derin, kontrollü ve kapsamlı',
-  engine: 'BilalAIPro'
-}
+```html
+<script src="model.js"></script>
+<script src="flashlitemodel.js"></script>
+<script src="pro-model.js"></script>
+<script src="script.js"></script>
+<script src="ai-enhancements.js"></script>
 ```
+
+Pro model profili: **5000–7500 ms**. Flash ve FlashLite kısa/genel isteklerde daha net hedef, teknoloji ve hata bağlamı isteyen cevaplar verir; Pro son 12 mesaja kadar bağlamla çalışır.
