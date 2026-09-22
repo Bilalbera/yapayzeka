@@ -16,7 +16,7 @@
   
     const MODEL_NAME = 'BilalAI - Flash 1.1';
     const MODEL_ICON = '⚡';
-    const BUILD_VERSION = '2026-09-22-r4';
+    const BUILD_VERSION = '2026-09-22-r5';
   
     const INTENTS = Object.freeze({
       WHAT: 'WHAT',
@@ -348,7 +348,7 @@
   
     function isContextualFollowUp(message) {
       const t = norm(message);
-      return t === 'nasıl' ||
+      if (t === 'nasıl' ||
         t === 'neden' ||
         t === 'peki' ||
         t === 'anlamadım' ||
@@ -357,12 +357,22 @@
         t === 'kısaca' ||
         t === 'özetle' ||
         t === 'daha basit' ||
-        t === 'daha basit anlat' ||
-        /^(peki\s+)?(bunu|bunu nasıl|bu|şu|o)\b/.test(t) ||
-        /^(peki|ama|şimdi|ve)\b/.test(t) ||
-        /^ya\s+(bu|şu|o)\b/.test(t) ||
-        /^(başka|farklı)\s+(bir\s+)?(örnek|yöntem|açıklama)/.test(t) ||
-        /^(evet|hayır)\b/.test(t);
+        t === 'daha basit anlat')
+        return true;
+      if (/^(peki\s+)?(bunu|bunu nasıl|bu|şu|o)\b/.test(t)) return true;
+      if (/^(peki|ama|şimdi|ve)\b/.test(t)) return true;
+      if (/^ya\s+(bu|şu|o)\b/.test(t)) return true;
+      if (/^(başka|farklı)\s+(bir\s+)?(örnek|yöntem|açıklama)/.test(t)) return true;
+      if (/^(evet|hayır)\b/.test(t)) return true;
+      if (detectProgrammingSubtopic(t) && (detectTeachingIntent(t) ||
+          hasAny(t, ['anlat', 'açıkla', 'daha basit', 'günlük'])))
+        return true;
+      if (detectProgrammingSubtopic(t) && hasAny(t, ['nedir', 'ne demek']))
+        return true;
+      if (hasAny(t, ['günlük hayattan', 'günlük örnek', 'günlük']) &&
+        t.length < 60)
+        return true;
+      return false;
     }
   
     function detectUserLevel(text) {
@@ -973,6 +983,167 @@
       'react': '**React**, kullanıcı arayüzlerini bileşenler halinde oluşturmak için kullanılan bir JavaScript kütüphanesidir.',
       'makine öğrenmesi': '**Makine öğrenmesi**, bilgisayarların açıkça her kural tek tek yazılmadan verilerdeki örüntülerden model oluşturmasını sağlayan yapay zekâ alt alanıdır.'
     };
+
+    const PROGRAMMING_SUBTOPICS = {
+      'değişkenler': {
+        aliases: ['değişken', 'değişkenler', 'degisken', 'degiskenler', 'variable', 'variables'],
+        title: 'Değişkenler',
+        analogy: 'Bir kutunun içine bir eşya koyduğunu düşün. Kutunun üzerinde "Telefon" etiketi var. Bu kutu değişken gibidir: bir isim verirsin ve o isim altında bir değer tutarsın.',
+        explanation: 'Programlamada değişken, bir değeri hafızada tutmak için verilen isimdir. Bir kutu gibi düşün: kutunun üstündeki etiket değişkenin adı, kutunun içindeki eşya ise değişkenin değeridir. Değeri istediğin zaman değiştirebilirsin.',
+        python: 'Python\'da bir değişken oluşturmak için bir isim yazıp eşittir işareti koyar ve değerini verirsin. Örneğin: yas = 25 yazdığında "yas" değişkeninin değeri 25 olur. Daha sonra bu ismi kullandığında Python o değeri getirir. Değeri sonradan değiştirebilirsin: yas = 26 dediğinde artık değer 26 olur.',
+        summary: 'Değişken = isim + değer. İsimle değere ulaşır, istediğin zaman değiştirirsin.'
+      },
+      'listeler': {
+        aliases: ['liste', 'listeler', 'list', 'array', 'dizi', 'diziler'],
+        title: 'Listeler',
+        analogy: 'Bir alışveriş listesi düşün: yumurta, ekmek, süt diye alt alta yazarsın. Bu liste tek bir kağıtta birden fazla öğeyi sırayla tutar.',
+        explanation: 'Liste, birden fazla değeri tek bir isim altında sırayla tutmaktır. Listeye ekleme yapabilir, içindekileri sıra numarasıyla ulaşabilir, çıkarabilirsin.',
+        python: 'Python\'da liste köşeli parantezle oluşturulur. Örneğin: meyveler = ["elma", "armut", "muz"] yazdığında üç meyveyi bir arada tutarsın. İlk öğeye meyveler[0], ikinciye meyveler[1] ile ulaşırsın. Yeni öğe eklemek için .append() kullanırsın.',
+        summary: 'Liste = sıralı değer koleksiyonu. Sıra numarasıyla ulaşır, ekler çıkarırsın.'
+      },
+      'fonksiyonlar': {
+        aliases: ['fonksiyon', 'fonksiyonlar', 'function', 'functions', 'metod', 'metot'],
+        title: 'Fonksiyonlar',
+        analogy: 'Bir tarif düşün: "yumurtalı ekmek yap" dediğinde birisi yumurtayı çırpıp ekmeği ısırıp tavada kızartır. Tarifin adı fonksiyon, içeriği ise o işi yapma adımlarıdır.',
+        explanation: 'Fonksiyon, belirli bir işi yapan ve yeniden kullanılabilen bir kod bloğudur. Bir kez tanımlarsın, sonra istediğin kadar çağırırsın. Girdi alabilir ve sonuç döndürebilir.',
+        python: 'Python\'da fonksiyon def kelimesiyle oluşturulur. Örneğin: def merhaba_de(ad): print("Merhaba " + ad) yazdığında bir fonksiyon tanımlamış olursun. merhaba_de("Ahmet") diye çağırdığında "Merhaba Ahmet" çıktısı alırsın.',
+        summary: 'Fonksiyon = adı + işi + girdi/çıktı. Bir kez yaz, birçok kez kullan.'
+      },
+      'döngüler': {
+        aliases: ['döngü', 'döngüler', 'dongu', 'donguler', 'loop', 'for', 'while'],
+        title: 'Döngüler',
+        analogy: 'Bir koşucunun pistte tur atması gibi: her tur aynı adımları tekrarlar ama her tur bir öncekinden devam eder.',
+        explanation: 'Döngü, aynı işlemi belirli bir koşul sağlanana veya listedeki her öğe bitene kadar tekrarlamaktır. Tekrarı elle yazmak yerine döngü kullanırsın.',
+        python: 'Python\'da for döngüsü bir listedeki her öğeyi sırayla gezer. Örneğin: for meyve in meyveler: print(meyve) yazdığında listedeki her meyveyi tek tek yazdırır. while döngüsü ise bir koşul doğru olduğu sürece devam eder.',
+        summary: 'Döngü = tekrar mekanizması. for listeyle, while koşulla çalışır.'
+      },
+      'koşullar': {
+        aliases: ['koşul', 'koşullar', 'kosul', 'kosullar', 'if', 'else', 'if else', 'koşullu', 'şart', 'şartlar'],
+        title: 'Koşullar (if/else)',
+        analogy: 'Bir kavşakta yol ayrımında "Eğer yağmur varsa şemsiye al, değilse gözlük al" demek gibi: duruma göre farklı şeyler yaparsın.',
+        explanation: 'Koşul, programa "eğer şu durum varsa şunu yap, yoksa bunu yap" demektir. Bu sayede program farklı durumlarda farklı davranır.',
+        python: 'Python\'da if ile koşul yazarsın. Örneğin: if yas >= 18: print("Erişkin") else: print("Çocuk") yazdığında yaş 18\'den büyükse "Erişkin", değilse "Çocuk" yazdırır.',
+        summary: 'Koşul = duruma göre karar. if doğruysa, else değilse çalışır.'
+      },
+      'sınıflar': {
+        aliases: ['sınıf', 'sınıflar', 'sinif', 'siniflar', 'class', 'classes', 'nesne', 'nesneler', 'object'],
+        title: 'Sınıflar ve Nesneler',
+        analogy: 'Bir ev planı düşün: plan kağıdı sınıftır, o plandan yapılmış ev ise nesnedir. Birden fazla ev yapabilirsin, hepsi aynı plana göre ama içleri farklıdır.',
+        explanation: 'Sınıf, bir şablon gibidir; nesne o şablondan üretilmiş örnek. Sınıf özellikleri ve davranışları tanımlar, nesne ise onları somut değerlerle kullanır.',
+        python: 'Python\'da class kelimesiyle sınıf oluşturulur. Sınıf içine özellikler ve metotlar yazılır. Sınıftan nesne oluşturduğunda, o nesne sınıfın özelliklerini alır.',
+        summary: 'Sınıf = şablon, nesne = o şablondan örnek.'
+      },
+      'modüller': {
+        aliases: ['modül', 'modüller', 'modul', 'moduller', 'module', 'modules', 'import'],
+        title: 'Modüller',
+        analogy: 'Bir alet çantası düşün: her çekmece farklı aletleri tutar. İhtiyacın olan aleti o çekmeceden alırsın. Modül de bu çekmece gibidir.',
+        explanation: 'Modül, hazır işlevleri bir arada tutan bir pakettir. import diyerek o paketten istediğin işlevi kullanırsın.',
+        python: 'Python\'da import ile modül yüklersin. Örneğin: import random yazdığında rastgele sayı üretme işlevini kullanabilirsin. from random import randint diyerek sadece istediğin parçayı da alabilirsin.',
+        summary: 'Modül = hazır paket. import ile yükler, içindekini kullanırsın.'
+      },
+      'tipler': {
+        aliases: ['tip', 'tipler', 'veri tipi', 'veri tipleri', 'type', 'types', 'int', 'string', 'float'],
+        title: 'Veri Tipleri',
+        analogy: 'Farklı kutular düşün: biri kitap için, biri yiyecek için, biri para için. Her kutu farklı türde şey tutar. Veri tipleri de böyledir.',
+        explanation: 'Veri tipi, bir değerin ne tür olduğunu belirtir: sayı, metin, ondalıklı sayı gibi. Python tipi otomatik anlar ama senin de bilmen gerekir.',
+        python: 'Python\'da temel tipler: int (tam sayı), float (ondalıklı), str (metin), bool (doğru/yanlış). Örneğin 25 bir int, "Merhaba" bir str, 3.14 bir float\'tur.',
+        summary: 'Veri tipi = değerin türü. Sayı, metin, ondalıklı, mantıksal.'
+      },
+      'stringler': {
+        aliases: ['string', 'strings', 'metin', 'metinler', 'karakter', 'karakter dizisi'],
+        title: 'Stringler (Metinler)',
+        analogy: 'Bir kitap düşün: harfler yan yana gelerek kelimeleri, kelimeler cümleleri oluşturur. String de harflerin yan yana gelmesiyle oluşan metindir.',
+        explanation: 'String, harflerin yan yana dizilmesiyle oluşan metin değeridir. Tırnak içinde yazılır ve metin işlemleri için kullanılır.',
+        python: 'Python\'da string tırnak işaretiyle oluşturulur. Örneğin: ad = "Ahmet" yazdığında ad değişkeni bir string olur. Stringleri birleştirebilir, parçalayabilir, içinde arama yapabilirsin.',
+        summary: 'String = tırnak içinde metin. Birleştir, parçala, ara.'
+      }
+    };
+
+    const TEACHING_SIGNALS = Object.freeze([
+      'öğret', 'öğretmek', 'öğrenmek istiyorum', 'öğreniyorum',
+      'adım adım anlat', 'çok basit şekilde öğret', 'basit şekilde öğret',
+      'yeni başladım', 'sıfırdan anlat', 'sıfırdan öğret',
+      'bana öğret', 'önce öğret', 'anlat', 'öğretir misin'
+    ]);
+
+    function detectTeachingIntent(text) {
+      return hasAny(text, TEACHING_SIGNALS);
+    }
+
+    function detectProgrammingSubtopic(text) {
+      const t = norm(text);
+      for (const [key, info] of Object.entries(PROGRAMMING_SUBTOPICS)) {
+        if (hasAny(t, info.aliases)) return key;
+      }
+      return null;
+    }
+
+    function detectFormatRequest(text) {
+      return hasAny(text, [
+        'günlük hayattan', 'günlük hayattan örnek', 'günlük örnek',
+        'günlük yaşamdan', 'önce günlük', 'günlük hayattan bir örnek'
+      ]);
+    }
+
+    function teachingResponse(subtopicKey, analysis, text, conversationState) {
+      const info = PROGRAMMING_SUBTOPICS[subtopicKey];
+      if (!info) return null;
+
+      const isBeginner = analysis.userLevel === 'beginner' ||
+        hasAny(text, ['çok basit', 'basit', 'yeni başladım']);
+      const wantsFormat = detectFormatRequest(text);
+      const simpler = hasAny(text, ['daha basit', 'daha sade', 'daha kolay']);
+      const langLabel = analysis.language === 'python' ? 'Python' :
+        analysis.language === 'javascript' ? 'JavaScript' : 'Python';
+
+      const intro = simpler
+        ? `## ${info.title} — daha basit anlatım`
+        : isBeginner
+          ? `## ${info.title} — başlangıç seviyesi`
+          : `## ${info.title}`;
+
+      if (wantsFormat) {
+        return `${intro}
+
+### Günlük hayattan örnek
+${info.analogy}
+
+### Bunun programlamadaki karşılığı
+${info.explanation}
+
+### ${langLabel}'da kavramsal olarak
+${info.python}
+
+### Kısa özet
+${info.summary}
+
+Bu açıklamada kod üretmedim.`;
+      }
+
+      if (isBeginner || simpler) {
+        return `${intro}
+
+${info.analogy}
+
+${info.explanation}
+
+**${langLabel}'da:** ${info.python}
+
+**Özet:** ${info.summary}
+
+Bu açıklamada kod üretmedim.`;
+      }
+
+      return `${intro}
+
+${info.explanation}
+
+**${langLabel}'da:** ${info.python}
+
+**Özet:** ${info.summary}
+
+Bu açıklamada kod üretmedim.`;
+    }
   
     /*
      * Bilgi katmanı için genişletilebilir kanca.
@@ -1028,6 +1199,15 @@
     }
   
     function questionResponse(text, topic, type, context, conversationState) {
+      const progSubtopic = detectProgrammingSubtopic(text) ||
+        (conversationState?.subtopic ? detectProgrammingSubtopic(conversationState.subtopic) : null);
+      if (progSubtopic) {
+        const lang = detectLanguageHint(text) || conversationState?.language || 'python';
+        const teachingResult = teachingResponse(progSubtopic,
+          { language: lang, userLevel: detectUserLevel(text), constraints: { noCode: hasNoCodeConstraint(text) } },
+          text, conversationState);
+        if (teachingResult) return teachingResult;
+      }
       const known = knownKnowledgeResponse(text, type);
       if (known) return known;
       return unknownKnowledgeResponse(topic, type, conversationState);
@@ -1081,10 +1261,38 @@
   **Başlangıç için sıra:** Önce Python temellerini öğren, ardından Discord botlarının olay/komut mantığını kavra, küçük bir merhaba komutuyla dene ve sonra izinler ile hata yönetimine geç. Bu açıklamada özellikle kod üretmedim.`;
       }
   
-      const known = knownKnowledgeResponse(text, INTENTS.WHAT) ||
-        knownKnowledgeResponse(text, INTENTS.HOW);
-      if (known) return `${known}\n\nİstersen bunu kod göstermeden kavramsal adımlara da ayırabilirim.`;
-  
+      const teachingSubtopic = detectProgrammingSubtopic(text) ||
+        (conversationState?.subtopic ? detectProgrammingSubtopic(conversationState.subtopic) : null);
+      const isTeaching = detectTeachingIntent(text) ||
+        (conversationState?.subtopic && detectProgrammingSubtopic(conversationState.subtopic) &&
+          hasAny(text, ['anlat', 'açıkla', 'daha basit']));
+      if (teachingSubtopic && (isTeaching || detectFormatRequest(text) ||
+          analysis.userLevel === 'beginner' || hasAny(text, ['daha basit']))) {
+        const teachingAnalysis = analysis.language
+          ? analysis
+          : { ...analysis, language: conversationState?.language || 'python' };
+        const teachingResult = teachingResponse(teachingSubtopic, teachingAnalysis, text, conversationState);
+        if (teachingResult) return teachingResult;
+      }
+
+      if (teachingSubtopic && (analysis.constraints.noCode ||
+          hasAny(text, ['nedir', 'ne demek', 'ne olduğunu', 'nasıl']))) {
+        const teachingAnalysis = analysis.language
+          ? analysis
+          : { ...analysis, language: conversationState?.language || 'python' };
+        const teachingResult = teachingResponse(teachingSubtopic, teachingAnalysis, text, conversationState);
+        if (teachingResult) return teachingResult;
+      }
+
+      const isPureGenericQuestion = !teachingSubtopic && (
+        hasAny(text, ['nedir', 'ne demek', 'ne anlama gelir', 'hakkında bilgi']));
+
+      if (isPureGenericQuestion) {
+        const known = knownKnowledgeResponse(text, INTENTS.WHAT) ||
+          knownKnowledgeResponse(text, INTENTS.HOW);
+        if (known) return `${known}\n\nİstersen bunu kod göstermeden kavramsal adımlara da ayırabilirim.}`;
+      }
+
       const label = conversationState?.topic || topic;
       return label
         ? `**${truncate(label, 90)}** konusunu kod yazmadan açıklayabilirim; önce ne olduğunu, nasıl çalıştığını ve temel adımları sırayla ele alalım.`
@@ -1575,6 +1783,14 @@
         { role: 'user', content: 'Python ile sayı tahmin oyunu yapıyorum.' },
         { role: 'assistant', content: 'Başlangıç örneği.' }
       ];
+      const pythonLearningContext = [
+        { role: 'user', content: 'Python öğreniyorum.' },
+        { role: 'assistant', content: 'Harika, Python ile devam edelim.' }
+      ];
+      const variablesContext = [
+        { role: 'user', content: 'Python\'da değişkenleri anlat.' },
+        { role: 'assistant', content: 'Değişkenler bir değer tutan isimlerdir.' }
+      ];
       const checks = [
         ['Kimya is not WHO', detectQuestionType('Kimya nedir?') === INTENTS.WHAT],
         ['Kuantum WHAT', detectQuestionType('Kuantum dolanıklığı nedir?') === INTENTS.WHAT],
@@ -1605,7 +1821,24 @@
         ['Follow-up gives game run guidance', generate('Bunu nasıl çalıştıracağım?', gameContext).includes('sayı tahmin oyunu')],
         ['Alternative is used', generate('Başka bir örnek ver ama daha basit anlat.', gameContext).includes('alternatif')],
         ['!ping explanation no code', generate('Discord botu hakkında konuşuyoruz. !ping komutunu anlat. Kod yazma.', []).includes('!ping')],
-        ['!ping explanation has no fence', !generate('Discord botu hakkında konuşuyoruz. !ping komutunu anlat. Kod yazma.', []).includes('```')]
+        ['!ping explanation has no fence', !generate('Discord botu hakkında konuşuyoruz. !ping komutunu anlat. Kod yazma.', []).includes('```')],
+        ['Python nedir gives general def', generate('Python nedir?', []).includes('genel amaçlı')],
+        ['Variables nedir not Python general', !generate("Python'da değişken nedir?", []).includes('genel amaçlı')],
+        ['Variables nedir teaches variables', generate("Python'da değişken nedir?", []).includes('Değişken')],
+        ['Teach variables not Python general', !generate('Bana Python\'da değişkenleri öğret.', []).includes('genel amaçlı')],
+        ['Teach variables has teaching', generate('Bana Python\'da değişkenleri öğret.', []).includes('Değişken')],
+        ['Beginner no-code variables no fence', !generate('Python öğrenmeye yeni başladım. Bana değişkenleri çok basit şekilde öğret. Kod yazma.', []).includes('```')],
+        ['Beginner no-code variables teaches', generate('Python öğrenmeye yeni başladım. Bana değişkenleri çok basit şekilde öğret. Kod yazma.', []).includes('Değişken')],
+        ['Format request has analogy', generate('Python öğrenmeye yeni başladım. Bana değişkenlerin ne olduğunu çok basit şekilde öğret. Kod yazma. Önce günlük hayattan bir örnek ver, sonra Python\'da bunun nasıl kullanıldığını sadece sözlü olarak açıkla.', []).includes('Günlük hayattan')],
+        ['Format request no fence', !generate('Python öğrenmeye yeni başladım. Bana değişkenlerin ne olduğunu çok basit şekilde öğret. Kod yazma. Önce günlük hayattan bir örnek ver, sonra Python\'da bunun nasıl kullanıldığını sadece sözlü olarak açıkla.', []).includes('```')],
+        ['Format request not Python general', !generate('Python öğrenmeye yeni başladım. Bana değişkenlerin ne olduğunu çok basit şekilde öğret. Kod yazma. Önce günlük hayattan bir örnek ver, sonra Python\'da bunun nasıl kullanıldığını sadece sözlü olarak açıkla.', []).includes('genel amaçlı')],
+        ['No-code variables explanation', generate("Python'da değişkenleri anlat ama kod gösterme.", []).includes('Değişken')],
+        ['No-code variables no fence', !generate("Python'da değişkenleri anlat ama kod gösterme.", []).includes('```')],
+        ['Context teaching inherits Python', generate('Değişkenleri öğret.', pythonLearningContext).includes('Değişken')],
+        ['Context teaching not fallback', !generate('Değişkenleri öğret.', pythonLearningContext).includes('sınıflandıramadım')],
+        ['Daha basit keeps variables', generate('Daha basit anlat.', variablesContext).includes('Değişken')],
+        ['Multi-topic variables first', generate('Python öğreniyorum. Önce değişkenleri öğret, sonra listelere geçeriz.', []).includes('Değişken')],
+        ['Multi-topic not Python general', !generate('Python öğreniyorum. Önce değişkenleri öğret, sonra listelere geçeriz.', []).includes('genel amaçlı')]
       ];
       const results = checks.map(([name, passed]) => ({ name, passed }));
       return {
