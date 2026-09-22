@@ -16,7 +16,7 @@
 
   const MODEL_NAME = 'BilalAI - Flash 1.1';
   const MODEL_ICON = '⚡';
-  const BUILD_VERSION = '2026-09-21-r2';
+  const BUILD_VERSION = '2026-09-22-r3';
 
   const INTENTS = Object.freeze({
     WHAT: 'WHAT',
@@ -129,7 +129,7 @@
 
     if (hasAny(t, [
       'nedir', 'ne demek', 'ne anlama gelir', 'ne işe yarar',
-      'ne oluyor', 'neleri kapsar', 'hakkında bilgi'
+      'ne oluyor', 'ne olduğunu', 'neleri kapsar', 'hakkında bilgi'
     ])) return INTENTS.WHAT;
 
     // Soru işareti tek başına WHAT değildir.
@@ -141,9 +141,28 @@
    * "Python nedir?", "React nedir?" ve "Python nasıl kullanılır?"
    * bilgi akışında kalır; üretim fiili/şablonu açıkça varsa kod akışına girer.
    */
+  const NO_CODE_SIGNALS = Object.freeze([
+    'kod yazma', 'kod verme', 'kod istemiyorum', 'kod olmadan anlat',
+    'henüz kod yazma', 'sadece anlat', 'mantığını anlat',
+    'kod göstermeden anlat', 'önce açıklama yap'
+  ]);
+
+  function hasNoCodeConstraint(text) {
+    return hasAny(text, NO_CODE_SIGNALS);
+  }
+
+  function isExplanationRequest(text) {
+    return hasAny(text, [
+      'anlat', 'açıkla', 'açıklama', 'mantığını',
+      'nasıl çalışıyor', 'nasıl çalışır', 'nasıl çalıştığını',
+      'ne olduğunu', 'hangi adımları', 'önce açıklama'
+    ]) || hasNoCodeConstraint(text);
+  }
+
   function isCodeGenerationRequest(text) {
     const t = norm(text);
     if (!t) return false;
+    if (hasNoCodeConstraint(t)) return false;
 
     const informationOnly = hasAny(t, [
       'nedir', 'ne demek', 'ne anlama gelir', 'nasıl kullanılır',
@@ -162,6 +181,7 @@
       'login ekranı yap', 'todo listesi yap', 'kodla'
     ]);
 
+    if (isExplanationRequest(t) && !explicitCode) return false;
     if (explicitCode || directBuild || buildPattern) return true;
     return !informationOnly && hasAny(t, ['kod', 'script', 'fonksiyon', 'algoritma']);
   }
@@ -333,8 +353,45 @@
       t === 'kısaca' ||
       t === 'özetle' ||
       /^(peki\s+)?(bunu|bunu nasıl|bu|şu|o)\b/.test(t) ||
+      /^(peki|ama|şimdi|ve)\b/.test(t) ||
       /^(başka|farklı)\s+(bir\s+)?(örnek|yöntem|açıklama)/.test(t) ||
       /^(evet|hayır)\b/.test(t);
+  }
+
+  function detectUserLevel(text) {
+    const t = norm(text);
+    if (hasAny(t, [
+      'yeni başladım', 'başlangıç seviyesindeyim', 'hiç bilmiyorum',
+      '12 yaşındaki birine anlat', 'basit anlat', 'sıfırdan anlat',
+      'başlangıç seviyesi'
+    ])) return 'beginner';
+    if (hasAny(t, ['ileri seviye', 'uzmanım', 'profesyonelce', 'detaylı teknik'])) {
+      return 'advanced';
+    }
+    return null;
+  }
+
+  function detectDomain(text, analysis) {
+    const t = norm(text);
+    if (analysis?.task === 'discord_bot' || hasAny(t, [
+      'python', 'javascript', 'react', 'html', 'css', 'sql', 'kod',
+      'programlama', 'minecraft', 'mod', 'datapack'
+    ])) return 'programlama';
+    if (hasAny(t, ['film', 'dizi', 'kitap', 'müzik', 'şarkı'])) return 'eğlence';
+    if (hasAny(t, ['yemek', 'tarif', 'menü'])) return 'günlük yaşam';
+    return null;
+  }
+
+  function detectSubtopic(text) {
+    const value = textOf(text)
+      .replace(/^(peki|ama|şimdi|ve)\s+/i, '')
+      .replace(/\?+\s*$/g, '')
+      .replace(/^(bunu|buna|bu|şu|o)\s+/i, '')
+      .replace(/^(nasıl|neden|niçin|niye|ne zaman|nerede|hangi)\s+/i, '')
+      .replace(/\s+(nasıl|neden|niçin|niye)\s+(çalışıyor|çalışır|yapılır|yapmalıyım)\s*$/i, '')
+      .replace(/\s+(çalışıyor|çalışır|yapılır|yapmalıyım)\s*$/i, '')
+      .trim();
+    return value.length >= 3 ? truncate(value, 100) : '';
   }
 
   function resolveWithContext(userMsg, context) {
@@ -354,16 +411,26 @@
     const topic = extractTopic(previousUser.content);
     if (!topic) return { resolved: original, topic: null, followUp: true };
     const analysis = analyzeCodeRequest(previousUser.content);
+    const previousIntent = detectQuestionType(previousUser.content);
+    const subtopic = detectSubtopic(original);
     const state = {
       topic,
+      subtopic: subtopic || null,
+      domain: detectDomain(previousUser.content, analysis),
       language: analysis.language,
       technology: analysis.technology,
       task: analysis.task,
+      intent: previousIntent || analysis.intent,
+      previousIntent,
+      userLevel: analysis.userLevel,
+      wantsCode: analysis.wantsCode,
+      wantsExplanation: analysis.wantsExplanation,
+      constraints: analysis.constraints,
       complexity: analysis.complexity
     };
 
     return {
-      resolved: `${original} (${topic} bağlamında)`,
+      resolved: `${original} (${topic}${subtopic ? ` / ${subtopic}` : ''} bağlamında)`,
       topic,
       state,
       followUp: true
@@ -375,9 +442,14 @@
       return { retry: false, tone: 'normal', alternative: false };
     }
 
-    // Yalnızca son kullanıcı mesajı önceki yanıtla ilgili feedback olabilir.
-    // Daha eski bir "yanlış" mesajı yeni, bağımsız bir soruya taşınmaz.
-    const lastUser = [...context].reverse().find((item) => item && item.role === 'user');
+    // Feedback, önceki asistan yanıtından sonra henüz işlenmemiş son kullanıcı
+    // mesajıysa geçerlidir. Araya yeni bir asistan yanıtı girdiyse eski feedback
+    // yeni ve bağımsız bir soruya taşınmaz.
+    const lastItem = context[context.length - 1];
+    if (!lastItem || lastItem.role !== 'user') {
+      return { retry: false, tone: 'normal', alternative: false };
+    }
+    const lastUser = lastItem;
     if (!lastUser) return { retry: false, tone: 'normal', alternative: false };
 
     const message = norm(lastUser.content);
@@ -425,6 +497,21 @@
     return null;
   }
 
+  function binaryResponse(binary, context) {
+    const lastAssistant = Array.isArray(context)
+      ? [...context].reverse().find((item) => item && item.role === 'assistant')
+      : null;
+    const previous = norm(lastAssistant?.content);
+
+    if (binary === 'positive' && hasAny(previous, ['göstereyim mi', 'anlatayım mı', 'ister misin'])) {
+      return 'Evet, devam edelim. İstediğin örneği bir sonraki adımda hazırlayabilirim.';
+    }
+    if (binary === 'negative' && hasAny(previous, ['deneyelim mi', 'ister misin', 'uygun mu'])) {
+      return 'Tamam, bu seçeneği uygulamıyorum. Başka bir yönden ilerleyebiliriz.';
+    }
+    return rand(binary === 'positive' ? TEMPLATES.yes : TEMPLATES.no);
+  }
+
   function decideDetailLevel(userMsg, context) {
     const text = textOf(userMsg);
     const t = norm(text);
@@ -446,19 +533,17 @@
   }
 
   function naturalFollowUp(detailLevel) {
-    const variants = {
-      brief: ['', '\n\nİstersen bir sonraki adımı da gösterebilirim.'],
-      balanced: ['', '\n\nİstersen bunu bir örnekle somutlaştırabilirim.'],
-      deep: ['\n\nTakıldığın bölümü söylersen onu ayrıca açabilirim.', '']
-    };
-    return rand(variants[detailLevel] || variants.balanced);
+    if (detailLevel !== 'deep') return '';
+    return rand([
+      '\n\nTakıldığın bölümü söylersen onu ayrıca açabilirim.',
+      ''
+    ]);
   }
 
   /* ============== KOD İSTEĞİ ANALİZİ ============== */
 
-  function detectCodeLang(text) {
+  function detectLanguageHint(text) {
     const t = norm(text);
-    if (!isCodeGenerationRequest(t)) return null;
 
     if (/\b(python|django|flask|pandas|numpy|pip)\b/i.test(t)) return 'python';
     if (/\b(typescript|javascript|node|nodejs|nextjs|next\.js|npm)\b/i.test(t)) return 'javascript';
@@ -477,6 +562,12 @@
       'fonksiyon yaz', 'bana kod', 'algoritma', 'program'
     ])) return 'javascript';
     return null;
+  }
+
+  function detectCodeLang(text) {
+    const t = norm(text);
+    if (!isCodeGenerationRequest(t)) return null;
+    return detectLanguageHint(t);
   }
 
   function detectCodeComplexity(text) {
@@ -523,9 +614,10 @@
   }
 
   function analyzeCodeRequest(text) {
-    const language = detectCodeLang(text);
-    const task = detectSpecificCodeTask(text);
     const normalized = norm(text);
+    const wantsCode = isCodeGenerationRequest(normalized);
+    const language = detectLanguageHint(normalized);
+    const task = detectSpecificCodeTask(text);
     let technology = null;
 
     if (task === 'discord_bot') {
@@ -547,9 +639,15 @@
     return {
       language,
       technology,
-      intent: language ? 'code_generation' : null,
+      intent: wantsCode ? 'code_generation' : isExplanationRequest(text) ? 'explanation' : null,
       task,
-      complexity: language ? detectCodeComplexity(text) : null
+      complexity: language ? detectCodeComplexity(text) : null,
+      wantsCode,
+      wantsExplanation: isExplanationRequest(text),
+      userLevel: detectUserLevel(text),
+      constraints: {
+        noCode: hasNoCodeConstraint(text)
+      }
     };
   }
 
@@ -901,35 +999,82 @@ main();`);
     return null;
   }
 
-  function unknownKnowledgeResponse(topic, type) {
-    const label = topic ? `“${truncate(topic, 90)}”` : 'bu konu';
+  function unknownKnowledgeResponse(topic, type, conversationState) {
+    const contextualLabel = conversationState?.topic && conversationState?.subtopic
+      ? `${conversationState.topic} içindeki ${conversationState.subtopic}`
+      : topic;
+    const label = contextualLabel ? `“${truncate(contextualLabel, 120)}”` : 'bu konu';
     const wording = type === INTENTS.HOW
       ? `${label} için konuya özel doğrulanmış bir bilgi kaynağım yok.`
       : `${label} hakkında elimde yeterli doğrulanmış bilgi yok.`;
     return `${wording} Elindeki metni, kaynağı veya kullandığın ortamı gönderirsen onun üzerinden yardımcı olabilirim.`;
   }
 
-  function questionResponse(text, topic, type, context) {
+  function questionResponse(text, topic, type, context, conversationState) {
     const known = knownKnowledgeResponse(text, type);
     if (known) return known;
-    return unknownKnowledgeResponse(topic, type);
+    return unknownKnowledgeResponse(topic, type, conversationState);
   }
 
-  function responseForQuestion(text, topic, type, context) {
+  function explanationResponse(text, analysis, topic, conversationState) {
+    if (analysis.task === 'discord_bot' ||
+      hasAny(text, ['discord bot', 'discord botu'])) {
+      const levelText = analysis.userLevel === 'beginner'
+        ? 'Başlangıç seviyesinde düşünürsek: '
+        : '';
+      return `## Discord botu nasıl çalışır?
+
+${levelText}Discord botu, Discord’un API’sine bağlanan ve sunucudaki olaylara tepki veren bir programdır. Kullanıcı mesaj gönderdiğinde, bir komut kullandığında veya bot hazır olduğunda Discord bir olay iletir; bot da bu olaya göre işlem yapar ve yanıt gönderir.
+
+**Temel akış:**
+1. Discord Developer Portal’da bir uygulama ve bot oluşturulur.
+2. Bot, güvenli bir token ile Discord’a bağlanır.
+3. Gerekli gateway intent ve sunucu izinleri açılır.
+4. Gelen mesaj veya komutlar ayrıştırılır.
+5. Bot, komuta uygun yanıtı veya işlemi üretir.
+
+**Başlangıç için sıra:** Önce Python temellerini öğren, ardından Discord botlarının olay/komut mantığını kavra, küçük bir merhaba komutuyla dene ve sonra izinler ile hata yönetimine geç. Bu açıklamada özellikle kod üretmedim.`;
+    }
+
+    const known = knownKnowledgeResponse(text, INTENTS.WHAT) ||
+      knownKnowledgeResponse(text, INTENTS.HOW);
+    if (known) return `${known}\n\nİstersen bunu kod göstermeden kavramsal adımlara da ayırabilirim.`;
+
+    const label = conversationState?.topic || topic;
+    return label
+      ? `**${truncate(label, 90)}** konusunu kod yazmadan açıklayabilirim; önce ne olduğunu, nasıl çalıştığını ve temel adımları sırayla ele alalım.`
+      : 'Konuyu kod yazmadan açıklayabilirim; önce ne olduğunu, nasıl çalıştığını ve temel adımları sırayla ele alalım.';
+  }
+
+  function contextualTaskGuidance(text, conversationState) {
+    if (conversationState?.task === 'guess_game' &&
+      hasAny(text, ['nasıl', 'çalıştır', 'çalıştıracağım'])) {
+      return `Python’daki **sayı tahmin oyunu** için çalıştırma adımları:
+
+1. Kodu \`tahmin.py\` gibi bir dosyaya kaydet.
+2. Terminali dosyanın bulunduğu klasörde aç.
+3. \`python tahmin.py\` komutunu çalıştır. Bazı sistemlerde \`python3 tahmin.py\` olabilir.
+4. Programın istediği tahmini yazıp Enter’a bas.`;
+    }
+    return null;
+  }
+
+  function responseForQuestion(text, topic, type, context, conversationState) {
     const providerAnswer = KnowledgeProvider.answer({
       userMsg: text,
       context: Array.isArray(context) ? context : [],
       intent: type,
-      topic
+      topic,
+      conversationState: conversationState || null
     });
     if (providerAnswer) return providerAnswer;
     if (type === INTENTS.WHO) {
-      return unknownKnowledgeResponse(topic, type);
+      return unknownKnowledgeResponse(topic, type, conversationState);
     }
     if (type === INTENTS.WHEN || type === INTENTS.WHERE || type === INTENTS.HOW_MANY) {
-      return unknownKnowledgeResponse(topic, type);
+      return unknownKnowledgeResponse(topic, type, conversationState);
     }
-    return questionResponse(text, topic, type, context);
+    return questionResponse(text, topic, type, context, conversationState);
   }
 
   function detectFeeling(text) {
@@ -977,15 +1122,16 @@ main();`);
     if (!request) return null;
 
     let category = null;
-    if (hasAny(t, ['film', 'filim', 'dizi', 'izle'])) category = 'movie';
-    else if (hasAny(t, ['kitap', 'oku'])) category = 'book';
-    else if (hasAny(t, ['müzik', 'şarkı', 'dinle', 'parça'])) category = 'music';
-    else if (hasAny(t, ['yemek', 'pişir', 'menü', 'tarif', 'yiyecek'])) category = 'food';
-    else if (hasAny(t, ['şehir', 'gezi', 'tatil', 'nereye'])) category = 'city';
-    else if (hasAny(t, ['oyun', 'oyna'])) category = 'game';
+    if (/\b(film|filim|dizi|izle)\w*/u.test(t)) category = 'movie';
+    else if (/\b(kitap|oku)\w*/u.test(t)) category = 'book';
+    else if (/\b(müzik|şarkı|dinle|parça)\w*/u.test(t)) category = 'music';
+    else if (/\b(yemek|pişir|menü|tarif|yiyecek)\w*/u.test(t)) category = 'food';
+    else if (/\b(şehir|gezi|tatil|nereye)\w*/u.test(t)) category = 'city';
+    else if (/\b(oyun|oyna)\w*/u.test(t)) category = 'game';
 
     const yearMatch = textOf(text).match(/\b(19|20)\d{2}\b/);
     return {
+      intent: 'recommendation',
       category,
       genre: category === 'movie' ? detectMovieGenre(text) : null,
       year: yearMatch ? Number(yearMatch[0]) : null
@@ -1128,8 +1274,10 @@ Tam hata mesajını, ilgili kodu ve kullandığın dil/framework sürümünü g�
     return 'Tam olarak ne yapmak istediğini biraz daha açarsan yardımcı olabilirim. İstersen hedefini ve kullandığın dili/ortamı yaz.';
   }
 
-  function gameHowResponse(text) {
-    const topic = hasAny(text, ['minecraft']) ? 'Minecraft korku oyunu' : 'oyun';
+  function gameHowResponse(text, conversationState) {
+    const minecraftContext = hasAny(text, ['minecraft']) ||
+      hasAny(conversationState?.topic, ['minecraft']);
+    const topic = minecraftContext ? 'Minecraft korku oyunu' : 'oyun';
     return `## 🎮 ${capitalize(topic)} için başlangıç planı
 
 1. **Platformu seç:** Minecraft Java mı, Bedrock mı? Mod, datapack veya addon yaklaşımı buna göre değişir.
@@ -1159,8 +1307,7 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
 
     // "Evet, istiyorum." ve "Hayır, istemiyorum." bağlam çözümünden önce ele alınır.
     const binary = classifyBinaryReply(original);
-    if (binary === 'positive') return rand(TEMPLATES.yes);
-    if (binary === 'negative') return rand(TEMPLATES.no);
+    if (binary) return binaryResponse(binary, ctx);
 
     const calculation = tryCalculate(original);
     if (calculation) return retryPrelude + calculation;
@@ -1168,6 +1315,7 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
     const resolvedContext = resolveWithContext(original, ctx);
     const raw = resolvedContext.resolved;
     const t = norm(raw);
+    const conversationState = resolvedContext.state || null;
     const topic = resolvedContext.topic ||
       (resolvedContext.followUp || isAlternativeRequest(original) ? null : extractTopic(original));
 
@@ -1238,27 +1386,58 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
       return retryPrelude + recommendationResponse(recommendation);
     }
 
-    const analysis = analyzeCodeRequest(raw);
-    if (!analysis.language && analysis.task === 'game') {
-      return retryPrelude + gameHowResponse(raw);
+    const analysisInput = resolvedContext.followUp ? original : raw;
+    const baseAnalysis = analyzeCodeRequest(analysisInput);
+    const analysis = conversationState
+      ? {
+        ...baseAnalysis,
+        language: baseAnalysis.language || conversationState.language,
+        technology: baseAnalysis.technology || conversationState.technology,
+        task: baseAnalysis.task || conversationState.task,
+        userLevel: baseAnalysis.userLevel || conversationState.userLevel,
+        complexity: baseAnalysis.complexity || conversationState.complexity,
+        constraints: {
+          ...(conversationState.constraints || {}),
+          ...(baseAnalysis.constraints || {})
+        }
+      }
+      : baseAnalysis;
+
+    if (!analysis.wantsCode && analysis.task === 'game') {
+      return retryPrelude + gameHowResponse(raw, conversationState);
     }
-    if (analysis.language) {
+    const taskGuidance = contextualTaskGuidance(analysisInput, conversationState);
+    if (!analysis.wantsCode && taskGuidance) {
+      return retryPrelude + taskGuidance;
+    }
+    if (analysis.wantsExplanation && !analysis.wantsCode &&
+      (analysis.constraints.noCode || (analysis.task && original.length > 80))) {
+      return retryPrelude + explanationResponse(raw, analysis, topic, conversationState);
+    }
+    if (analysis.wantsCode && analysis.language) {
       return retryPrelude + codeSample(analysis, original) + naturalFollowUp(detail.level);
     }
 
-    const questionType = detectQuestionType(raw);
+    const questionInput = resolvedContext.followUp ? original : raw;
+    const questionType = detectQuestionType(questionInput);
     if (questionType === INTENTS.WHY &&
-      hasAny(raw, ['çalışmıyor', 'çalışmadı', 'hata veriyor', 'neden bozuldu'])) {
+      hasAny(questionInput, ['çalışmıyor', 'çalışmadı', 'hata veriyor', 'neden bozuldu'])) {
       return retryPrelude + whyDebugResponse();
     }
-    if (isTechnicalError(raw)) return retryPrelude + technicalErrorResponse();
+    if (isTechnicalError(questionInput)) return retryPrelude + technicalErrorResponse();
 
     if (isNegativeFeedback(original)) {
       return 'Haklı olabilirsin; hangi bölümün yanlış olduğunu söylersen onu doğrudan düzelteyim.';
     }
 
     if (questionType) {
-      const answer = responseForQuestion(raw, topic, questionType, ctx);
+      const answer = responseForQuestion(
+        questionInput,
+        topic,
+        questionType,
+        ctx,
+        conversationState
+      );
       return retryPrelude + answer + naturalFollowUp(detail.level);
     }
 
@@ -1330,6 +1509,10 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
     analyzeCodeRequest,
     tryCalculate,
     resolveWithContext,
+    detectRecommendation,
+    detectMovieGenre,
+    classifyBinaryReply,
+    isTechnicalError,
     KnowledgeProvider,
     setKnowledgeProvider,
     detectAdviceCategory: (text) => {
