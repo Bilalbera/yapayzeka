@@ -129,7 +129,8 @@
 
     if (hasAny(t, [
       'nedir', 'ne demek', 'ne anlama gelir', 'ne işe yarar',
-      'ne oluyor', 'ne olduğunu', 'neleri kapsar', 'hakkında bilgi'
+      'ne oluyor', 'ne olduğunu', 'ne yapıyor', 'ne yapar',
+      'neleri kapsar', 'hakkında bilgi'
     ])) return INTENTS.WHAT;
 
     // Soru işareti tek başına WHAT değildir.
@@ -143,6 +144,7 @@
    */
   const NO_CODE_SIGNALS = Object.freeze([
     'kod yazma', 'kod verme', 'kod istemiyorum', 'kod olmadan anlat',
+    'kod yazmadan', 'kod vermeden',
     'henüz kod yazma', 'sadece anlat', 'mantığını anlat',
     'kod göstermeden anlat', 'önce açıklama yap'
   ]);
@@ -154,6 +156,7 @@
   function isExplanationRequest(text) {
     return hasAny(text, [
       'anlat', 'açıkla', 'açıklama', 'mantığını',
+      'öğret', 'öğretmek', 'öğrenmek istiyorum',
       'nasıl çalışıyor', 'nasıl çalışır', 'nasıl çalıştığını',
       'ne olduğunu', 'hangi adımları', 'önce açıklama'
     ]) || hasNoCodeConstraint(text);
@@ -169,7 +172,8 @@
       'hakkında bilgi', 'ne işe yarar'
     ]);
     const explicitCode = hasAny(t, [
-      'kod yaz', 'kodunu yaz', 'örnek kod', 'kod örneği', 'script yaz',
+      'kod yaz', 'kodu yaz', 'kodunu yaz', 'kod ver', 'kodu ver',
+      'örnek kod', 'kod örneği', 'script yaz',
       'fonksiyon yaz', 'program yaz', 'bana kod', 'algoritma yaz',
       'uygulama oluştur', 'proje oluştur', 'component oluştur',
       'bileşen oluştur', 'sorgu yaz', 'sayfa oluştur', 'giriş ekranı yap'
@@ -352,8 +356,11 @@
       t === 'devam et' ||
       t === 'kısaca' ||
       t === 'özetle' ||
+      t === 'daha basit' ||
+      t === 'daha basit anlat' ||
       /^(peki\s+)?(bunu|bunu nasıl|bu|şu|o)\b/.test(t) ||
       /^(peki|ama|şimdi|ve)\b/.test(t) ||
+      /^ya\s+(bu|şu|o)\b/.test(t) ||
       /^(başka|farklı)\s+(bir\s+)?(örnek|yöntem|açıklama)/.test(t) ||
       /^(evet|hayır)\b/.test(t);
   }
@@ -383,6 +390,9 @@
   }
 
   function detectSubtopic(text) {
+    const commandToken = extractCommandToken(text);
+    if (commandToken) return commandToken;
+
     const value = textOf(text)
       .replace(/^(peki|ama|şimdi|ve)\s+/i, '')
       .replace(/\?+\s*$/g, '')
@@ -392,6 +402,10 @@
       .replace(/\s+(çalışıyor|çalışır|yapılır|yapmalıyım)\s*$/i, '')
       .trim();
     return value.length >= 3 ? truncate(value, 100) : '';
+  }
+
+  function extractCommandToken(text) {
+    return textOf(text).match(/![a-zçğıöşü0-9_-]+/iu)?.[0] || '';
   }
 
   function resolveWithContext(userMsg, context) {
@@ -545,7 +559,7 @@
   function detectLanguageHint(text) {
     const t = norm(text);
 
-    if (/\b(python|django|flask|pandas|numpy|pip)\b/i.test(t)) return 'python';
+    if (/\b(python\w*|django|flask|pandas|numpy|pip)\b/iu.test(t)) return 'python';
     if (/\b(typescript|javascript|node|nodejs|nextjs|next\.js|npm)\b/i.test(t)) return 'javascript';
     if (/\b(java|kotlin)\b/i.test(t)) return 'java';
     if (/\b(go|golang)\b/i.test(t)) return 'go';
@@ -593,7 +607,8 @@
 
   function detectSpecificCodeTask(text) {
     const t = norm(text);
-    if (hasAny(t, ['discord bot', 'discord botu', 'discord.js', 'discord py'])) return 'discord_bot';
+    if (hasAny(t, ['discord bot', 'discord botu', 'discord.js', 'discord py']) ||
+      /\bdiscord\s+bot\w*/iu.test(t)) return 'discord_bot';
     if (hasAny(t, ['hesap makinesi', 'calculator', 'hesapla'])) return 'calculator';
     if (hasAny(t, ['giriş sayfası', 'giriş ekranı', 'login sayfası', 'login ui'])) return 'login_ui';
     if (hasAny(t, ['sayı tahmin oyunu', 'tahmin oyunu', 'guess game'])) return 'guess_game';
@@ -989,7 +1004,9 @@ main();`);
 
   function knownKnowledgeResponse(text, type) {
     for (const [key, answer] of Object.entries(KNOWN_KNOWLEDGE)) {
-      if (hasAny(text, [key])) {
+      const matchesKey = hasAny(text, [key]) ||
+        (key === 'python' && /\bpython\w*\b/iu.test(norm(text)));
+      if (matchesKey) {
         if (type === INTENTS.HOW && key === 'python') {
           return '**Python kullanmaya başlamak için:** Python’u kur, bir `.py` dosyası oluştur, `print("Merhaba")` gibi küçük bir kod çalıştır ve ardından değişken, koşul, döngü ve fonksiyonlarla ilerle.';
         }
@@ -1019,6 +1036,16 @@ main();`);
   function explanationResponse(text, analysis, topic, conversationState) {
     if (analysis.task === 'discord_bot' ||
       hasAny(text, ['discord bot', 'discord botu'])) {
+      const commandToken = extractCommandToken(text) || conversationState?.subtopic;
+      if (commandToken && commandToken.startsWith('!')) {
+        return `## ${commandToken} komutu nasıl çalışır?
+
+${commandToken}, Discord botlarında belirli bir işlemi başlatan komut olarak ele alınır. Kullanıcı komutu gönderir; bot mesajı algılar, komut adını ve varsa parametreleri ayırır, yetki/izin kontrolü yapar ve ardından uygun yanıtı gönderir.
+
+**Basit akış:** mesaj gelir → ${commandToken} tanınır → izinler kontrol edilir → komut işlemi çalışır → bot yanıt verir.
+
+Bu açıklamada kod üretmedim.`;
+      }
       const levelText = analysis.userLevel === 'beginner'
         ? 'Başlangıç seviyesinde düşünürsek: '
         : '';
@@ -1057,6 +1084,31 @@ ${levelText}Discord botu, Discord’un API’sine bağlanan ve sunucudaki olayla
 4. Programın istediği tahmini yazıp Enter’a bas.`;
     }
     return null;
+  }
+
+  function alternativeResponse(text, conversationState) {
+    const simpler = hasAny(text, ['daha basit', 'basit anlat', 'kısaca']);
+    const state = conversationState || {};
+
+    if (state.task === 'guess_game' && state.language === 'python' &&
+      state.wantsCode && !state.constraints?.noCode) {
+      const code = `gizli_sayi = 7
+tahmin = int(input("Tahminin: "))
+
+if tahmin == gizli_sayi:
+    print("Bildin!")
+else:
+    print("Bu kez olmadı.")`;
+      return `## ${simpler ? 'Daha basit ' : ''}alternatif sayı tahmini\n\n` +
+        `${codeFence('python', code)}\n\nBu sürüm tek tahmin alır; önceki döngülü örnekten daha kısa bir alternatiftir.`;
+    }
+
+    if (state.constraints?.noCode) {
+      return `**${truncate(state.topic || 'Bu konu', 90)}** için kodsuz, daha basit bir açıklama verebilirim: önce amacı, sonra temel akışı ve en son uygulanacak adımları anlatacağım.`;
+    }
+
+    return `**${truncate(state.topic || 'Aynı konu', 90)}** için farklı bir örnek hazırlayabilirim. ` +
+      (simpler ? 'Bu kez daha kısa ve başlangıç seviyesinde ilerleyeceğim.' : 'Önceki örneği tekrarlamak yerine farklı bir yaklaşım kullanacağım.');
   }
 
   function responseForQuestion(text, topic, type, context, conversationState) {
@@ -1388,6 +1440,11 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
 
     const analysisInput = resolvedContext.followUp ? original : raw;
     const baseAnalysis = analyzeCodeRequest(analysisInput);
+    const currentNoCode = baseAnalysis.constraints?.noCode === true;
+    const explicitCodeOverride = baseAnalysis.wantsCode && !currentNoCode;
+    const inheritedNoCode = conversationState?.constraints?.noCode === true &&
+      !explicitCodeOverride;
+    const effectiveNoCode = currentNoCode || inheritedNoCode;
     const analysis = conversationState
       ? {
         ...baseAnalysis,
@@ -1396,12 +1453,31 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
         task: baseAnalysis.task || conversationState.task,
         userLevel: baseAnalysis.userLevel || conversationState.userLevel,
         complexity: baseAnalysis.complexity || conversationState.complexity,
+        wantsCode: baseAnalysis.wantsCode && !effectiveNoCode,
+        intent: baseAnalysis.wantsCode && !effectiveNoCode
+          ? 'code_generation'
+          : baseAnalysis.intent,
         constraints: {
           ...(conversationState.constraints || {}),
-          ...(baseAnalysis.constraints || {})
+          ...(baseAnalysis.constraints || {}),
+          noCode: effectiveNoCode
         }
       }
-      : baseAnalysis;
+      : {
+        ...baseAnalysis,
+        wantsCode: baseAnalysis.wantsCode && !currentNoCode,
+        intent: baseAnalysis.wantsCode && !currentNoCode
+          ? 'code_generation'
+          : baseAnalysis.intent,
+        constraints: {
+          ...(baseAnalysis.constraints || {}),
+          noCode: currentNoCode
+        }
+      };
+
+    if (isAlternativeRequest(original) && conversationState) {
+      return retryPrelude + alternativeResponse(original, conversationState);
+    }
 
     if (!analysis.wantsCode && analysis.task === 'game') {
       return retryPrelude + gameHowResponse(raw, conversationState);
@@ -1411,7 +1487,8 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
       return retryPrelude + taskGuidance;
     }
     if (analysis.wantsExplanation && !analysis.wantsCode &&
-      (analysis.constraints.noCode || (analysis.task && original.length > 80))) {
+      (analysis.constraints.noCode ||
+        (!resolvedContext.followUp && (analysis.task || analysis.language)))) {
       return retryPrelude + explanationResponse(raw, analysis, topic, conversationState);
     }
     if (analysis.wantsCode && analysis.language) {
@@ -1420,6 +1497,9 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
 
     const questionInput = resolvedContext.followUp ? original : raw;
     const questionType = detectQuestionType(questionInput);
+    const commandQuestion = !questionType &&
+      extractCommandToken(questionInput) &&
+      (resolvedContext.followUp || isExplanationRequest(questionInput));
     if (questionType === INTENTS.WHY &&
       hasAny(questionInput, ['çalışmıyor', 'çalışmadı', 'hata veriyor', 'neden bozuldu'])) {
       return retryPrelude + whyDebugResponse();
@@ -1440,6 +1520,16 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
       );
       return retryPrelude + answer + naturalFollowUp(detail.level);
     }
+    if (commandQuestion) {
+      const answer = responseForQuestion(
+        questionInput,
+        topic,
+        INTENTS.WHAT,
+        ctx,
+        conversationState
+      );
+      return retryPrelude + answer;
+    }
 
     if (resolvedContext.followUp && topic) {
       return `Önceki konu olan **${truncate(topic, 100)}** üzerinden devam edebiliriz. ` +
@@ -1457,6 +1547,15 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
   }
 
   function runSelfTests() {
+    const noCodePrompt = 'Bana Python öğret. Ama kod yazma.';
+    const discordContext = [
+      { role: 'user', content: 'Discord botu nedir?' },
+      { role: 'assistant', content: 'Yeterli doğrulanmış bilgi yok.' }
+    ];
+    const gameContext = [
+      { role: 'user', content: 'Python ile sayı tahmin oyunu yapıyorum.' },
+      { role: 'assistant', content: 'Başlangıç örneği.' }
+    ];
     const checks = [
       ['Kimya is not WHO', detectQuestionType('Kimya nedir?') === INTENTS.WHAT],
       ['Kuantum WHAT', detectQuestionType('Kuantum dolanıklığı nedir?') === INTENTS.WHAT],
@@ -1477,7 +1576,12 @@ Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod m
       ['Math decimal', tryCalculate('5.5 + 2.3')?.includes('7.8') === true],
       ['No unrelated current movie list', !generate("2026'da çıkan korku filmlerinden öner", []).includes('Interstellar')],
       ['Minecraft plan', generate("Minecraft'ta korku oyunu yapmak istiyorum, nereden başlamalıyım?", []).includes('Platformu seç')],
-      ['No Hello Discord fallback', !generate('Python ile Discord botu yap', []).includes("print('Hello')")]
+      ['No Hello Discord fallback', !generate('Python ile Discord botu yap', []).includes("print('Hello')")],
+      ['No-code teaching has no fence', !generate(noCodePrompt, []).includes('```')],
+      ['No-code Discord has no fence', !generate('Python ile Discord botu yap ama kod verme.', []).includes('```')],
+      ['Follow-up keeps Discord context', generate('Peki komutlar nasıl çalışıyor?', discordContext).includes('Discord botu')],
+      ['Follow-up gives game run guidance', generate('Bunu nasıl çalıştıracağım?', gameContext).includes('sayı tahmin oyunu')],
+      ['Alternative is used', generate('Başka bir örnek ver ama daha basit anlat.', gameContext).includes('alternatif')]
     ];
     const results = checks.map(([name, passed]) => ({ name, passed }));
     return {
