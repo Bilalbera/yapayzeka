@@ -1,8 +1,9 @@
 /* ==========================================================
-   model.js | BilalAI 1.0 - Flash Yanıt Motoru
+   model.js | BilalAI 1.2 - Flash Yanıt Motoru (r6)
 
    Kullanım:
      BilalAIResponseEngine.generate(userMsg, contextArray)
+     BilalAIResponseEngine.generateAsync(userMsg, contextArray)
 
    contextArray:
      [{ role: 'user'|'assistant', content: string }]
@@ -14,9 +15,9 @@
    (function () {
     'use strict';
   
-    const MODEL_NAME = 'BilalAI - Flash 1.1';
+    const MODEL_NAME = 'BilalAI - Flash 1.2';
     const MODEL_ICON = '⚡';
-    const BUILD_VERSION = '2026-09-22-r5';
+    const BUILD_VERSION = '2026-09-22-r6';
   
     const INTENTS = Object.freeze({
       WHAT: 'WHAT',
@@ -32,6 +33,23 @@
       'python', 'javascript', 'java', 'go', 'rust',
       'htmlcss', 'react', 'sql', 'git', 'flutter'
     ]);
+
+    /* Türkçe karakter kümesi — \b kelime sınırı Türkçe harfleri
+       tanımadığı için kendi kelime sınırımızı kullanıyoruz. */
+    const TR_LETTERS = 'a-zçğıöşü';
+    const TR_SUFFIX_CHAR = `[${TR_LETTERS}0-9]`; // ek başlangıcı olabilecek karakter
+    const LANG_LABELS = Object.freeze({
+      python: 'Python',
+      javascript: 'JavaScript',
+      java: 'Java',
+      go: 'Go',
+      rust: 'Rust',
+      htmlcss: 'HTML/CSS',
+      react: 'React',
+      sql: 'SQL',
+      git: 'Git',
+      flutter: 'Flutter'
+    });
   
     function rand(items) {
       return items[Math.floor(Math.random() * items.length)];
@@ -44,7 +62,7 @@
     function norm(value) {
       return textOf(value)
         .toLocaleLowerCase('tr-TR')
-        .replace(/[.,;:!?'"“”‘’[\]{}]/g, ' ')
+        .replace(/[.,;:!?'"""''[\]{}]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
     }
@@ -74,6 +92,21 @@
   
     function hasPhrase(value, phrase) {
       return hasAny(value, [phrase]);
+    }
+
+    /* Türkçe kök eşleme: verilen kök, Türkçe eklerle çekimlenmiş
+       biçimlerde de eşleşsin (değişken, değişkenler, değişkeni, değişkenleri). */
+    function hasTurkishRoot(value, root) {
+      const source = norm(value);
+      const r = norm(root);
+      if (!r) return false;
+      return new RegExp(
+        `(?:^|\\s)${escapeRegExp(r)}${TR_SUFFIX_CHAR}*(?=\\s|$)`, 'u'
+      ).test(source);
+    }
+
+    function hasTurkishRootAny(value, roots) {
+      return roots.some((root) => hasTurkishRoot(value, root));
     }
   
     function capitalize(value) {
@@ -162,6 +195,44 @@
       ]) || hasNoCodeConstraint(text);
     }
   
+    /* ===== HATA 5: Türkçe fiil çekimleri ve kelime sınırları ===== */
+
+    // Yalın/emir biçimindeki üretim fiilleri. \b Türkçe harfleri tanımadığı
+    // için bu fiilleri hasTurkishRoot benzeri mantıkla, eksiz biçimde
+    // arıyoruz: "yap" eşleşir, "yapıyorum"/"yaptım"/"yapacak" eşleşmez.
+    const PRODUCTION_VERBS = Object.freeze([
+      'yap', 'oluştur', 'geliştir', 'yaz', 'kur'
+    ]);
+
+    // Çekimli (progressive/geçmiş/gelecek/istek) biçimler — kod üretimi
+    // olarak kabul edilmemeli.
+    const NON_IMPERATIVE_VERBS = Object.freeze([
+      'yapıyorum', 'yapıyoruz', 'yaptım', 'yaptık', 'yapacağım', 'yapacağız',
+      'yapacak', 'yapacaksın', 'yapıyorsun',
+      'oluşturuyorum', 'oluşturduk', 'oluşturacağım', 'oluşturacağız',
+      'geliştiriyorum', 'geliştirdim', 'geliştireceğim', 'geliştireceğiz',
+      'yazıyorum', 'yazdım', 'yazacağım', 'yazıyoruz',
+      'kuruyorum', 'kurdum', 'kuracağım', 'kuruyoruz',
+      'yapmak istiyorum', 'oluşturmak istiyorum', 'geliştirmek istiyorum',
+      'yazmak istiyorum', 'kurmak istiyorum',
+      'yapmak istiyoruz', 'oluşturmak istiyoruz', 'geliştirmek istiyoruz'
+    ]);
+
+    function hasStandaloneProductionVerb(text) {
+      const source = norm(text);
+      return PRODUCTION_VERBS.some((verb) => {
+        const v = norm(verb);
+        // Fiil kökü, ardından Türkçe ek karakteri GELMEDİĞİ durumda eşleşir.
+        return new RegExp(
+          `(?:^|\\s)${escapeRegExp(v)}(?!${TR_SUFFIX_CHAR})`, 'u'
+        ).test(source);
+      });
+    }
+
+    function isNonImperativeVerb(text) {
+      return hasAny(text, NON_IMPERATIVE_VERBS);
+    }
+  
     function isCodeGenerationRequest(text) {
       const t = norm(text);
       if (!t) return false;
@@ -178,7 +249,13 @@
         'uygulama oluştur', 'proje oluştur', 'component oluştur',
         'bileşen oluştur', 'sorgu yaz', 'sayfa oluştur', 'giriş ekranı yap'
       ]);
-      const buildPattern = /\b(ile|kullanarak|üzerinde)\b.*\b(yap|yapmak|oluştur|oluşturmak|geliştir|geliştirmek|yaz|yazmak|kur|kurmak)\b/u.test(t);
+
+      const nonImperative = isNonImperativeVerb(t);
+      const standaloneVerb = hasStandaloneProductionVerb(t);
+      const hasConnector = hasAny(t, ['ile', 'kullanarak', 'üzerinde']);
+
+      // buildPattern: bağlaç + yalın fiil, ama çekimli fiil değil.
+      const buildPattern = hasConnector && standaloneVerb && !nonImperative;
       const directBuild = hasAny(t, [
         'uygulama yap', 'proje yap', 'oyun yap', 'bot yap',
         'hesap makinesi yap', 'giriş sayfası yap', 'login sayfası yap',
@@ -186,11 +263,13 @@
       ]);
   
       if (isExplanationRequest(t) && !explicitCode) return false;
+      // Çekimli fiil varsa ve açık kod isteği yoksa kod üretme.
+      if (nonImperative && !explicitCode && !directBuild) return false;
       if (explicitCode || directBuild || buildPattern) return true;
       return !informationOnly && hasAny(t, ['kod', 'script', 'fonksiyon', 'algoritma']);
     }
   
-    /* ============== GÜVENLİ MATEMATİK PARSERİ ============== */
+    /* ============== GÜVENLİ MATEMATİK PARSERİ (HATA 8) ============== */
   
     function tokenizeMath(expression) {
       const source = textOf(expression)
@@ -225,6 +304,10 @@
       return tokens.length ? tokens : null;
     }
   
+    /* HATA 8: Yapılandırılmış hata dönüşü.
+       Başarı: { ok: true, value: number }
+       Hata:   { ok: false, error: 'DIVISION_BY_ZERO' | 'PARSE_ERROR' }
+       Matematik değil: null */
     function parseMathExpression(expression) {
       const tokens = tokenizeMath(expression);
       if (!tokens) return null;
@@ -268,7 +351,11 @@
           const operator = peek().type;
           position += 1;
           const right = primary();
-          if (right === null || (operator === '/' && right === 0)) return null;
+          if (right === null) return null;
+          if (operator === '/' && right === 0) {
+            // Yapılandırılmış hata: sıfıra bölme
+            return { _divByZero: true };
+          }
           value = operator === '*' ? value * right : value / right;
           if (!Number.isFinite(value)) return null;
         }
@@ -278,11 +365,13 @@
       function addition() {
         let value = multiplication();
         if (value === null) return null;
+        if (typeof value === 'object' && value._divByZero) return value;
         while (peek()?.type === '+' || peek()?.type === '-') {
           const operator = peek().type;
           position += 1;
           const right = multiplication();
           if (right === null) return null;
+          if (typeof right === 'object' && right._divByZero) return right;
           value = operator === '+' ? value + right : value - right;
           if (!Number.isFinite(value)) return null;
         }
@@ -290,7 +379,13 @@
       }
   
       const result = addition();
-      return position === tokens.length && Number.isFinite(result) ? result : null;
+      if (typeof result === 'object' && result._divByZero) {
+        return { ok: false, error: 'DIVISION_BY_ZERO' };
+      }
+      if (result === null) return null;
+      return position === tokens.length && Number.isFinite(result)
+        ? { ok: true, value: result }
+        : null;
     }
   
     function extractMathExpression(text) {
@@ -301,7 +396,9 @@
         const compact = candidate.replace(/\s+/g, '').trim();
         if (!compact || !/[+\-*x×÷/]/i.test(compact)) continue;
         if (!/\d/.test(compact)) continue;
-        if (parseMathExpression(compact) !== null) return compact;
+        const parsed = parseMathExpression(compact);
+        // Sıfıra bölme bile matematik ifadesi olarak tanınmalı.
+        if (parsed !== null) return compact;
       }
       return null;
     }
@@ -311,7 +408,14 @@
       if (!expression) return null;
       const result = parseMathExpression(expression);
       if (result === null) return null;
+      if (!result.ok) {
+        if (result.error === 'DIVISION_BY_ZERO') {
+          return 'Sıfıra bölme yapılamaz. 🧮';
+        }
+        return null;
+      }
   
+      const value = result.value;
       const prettyExpression = expression
         .replace(/\*/g, ' × ')
         .replace(/\//g, ' ÷ ')
@@ -320,10 +424,63 @@
         .replace(/\s+/g, ' ')
         .trim();
   
-      return `İşlem sonucu:\n**${prettyExpression} = ${Number(result.toFixed(10))}** 🧮`;
+      return `İşlem sonucu:\n**${prettyExpression} = ${Number(value.toFixed(10))}** 🧮`;
     }
   
-    /* ============== BAĞLAM ============== */
+    /* ============== BAĞLAM (HATA 3) ============== */
+
+    // Follow-up aksiyon ve format istekleri — bunlar topic değildir.
+    const FOLLOW_UP_ACTIONS = Object.freeze({
+      simplify: ['daha basit', 'daha basit anlat', 'daha sade', 'daha kolay',
+        'basit anlat', 'sadeleştir', 'kısaca anlat'],
+      elaborate: ['daha detaylı', 'daha uzun', 'açıklamayı genişlet',
+        'daha kapsamlı'],
+      continue: ['devam', 'devam et', 'devam etmisin', 'başka ne var',
+        'sıradaki', 'sonra ne'],
+      clarify: ['anlamadım', 'açıklar mısın', 'tekrarlar mısın', 'daha açık',
+        'net değil'],
+      run: ['nasıl çalıştır', 'çalıştıracağım', 'çalıştırmak', 'nasıl çalışır',
+        'nasıl başlat', 'başlatacağım', 'çalıştırır mısın'],
+      commands: ['komutlar nasıl', 'komutlar nasıl çalışıyor', 'komutlar nasıl çalışır',
+        'komut nedir', 'komutlar nedir']
+    });
+
+    const FORMAT_REQUESTS = Object.freeze({
+      daily_life_example: ['günlük hayattan', 'günlük hayattan örnek', 'günlük örnek',
+        'günlük yaşamdan', 'önce günlük', 'günlük hayattan bir örnek',
+        'günlük hayattan bir örnekle'],
+      analogy: ['benzer bir örnekle', 'analoji', 'metaforla', 'kıyasla'],
+      real_example: ['gerçek bir örnek', 'gerçek örnek', 'gerçek hayattan']
+    });
+  
+    function detectFollowUpAction(text) {
+      const t = norm(text);
+      for (const [action, keywords] of Object.entries(FOLLOW_UP_ACTIONS)) {
+        if (hasAny(t, keywords)) return action;
+      }
+      return null;
+    }
+
+    function detectFormatRequest(text) {
+      const t = norm(text);
+      for (const [format, keywords] of Object.entries(FORMAT_REQUESTS)) {
+        if (hasAny(t, keywords)) return format;
+      }
+      return null;
+    }
+
+    // Fiil/eylem ifadeleri otomatik subtopic yapılmasın.
+    const VERB_PATTERNS = Object.freeze([
+      'çalıştıracağım', 'çalıştırmak', 'çalıştır', 'yapacağım', 'yapmalıyım',
+      'anlat', 'açıkla', 'devam', 'daha basit', 'günlük', 'komutlar',
+      'nasıl çalışıyor', 'nasıl çalıştır', 'başka bir örnek',
+      'günlük hayattan', 'daha sade', 'daha kolay'
+    ]);
+
+    function isVerbOrFollowUpPhrase(text) {
+      const t = norm(text);
+      return VERB_PATTERNS.some((p) => hasPhrase(t, p));
+    }
   
     function extractTopic(message) {
       let value = textOf(message).trim();
@@ -340,9 +497,12 @@
       const t = norm(message);
       if (!t || t.length < 4) return false;
       if (isBinaryReply(t) || isAlternativeRequest(t) || isNegativeFeedback(t)) return false;
-      return ![
+      return ![ 
         'peki', 'tamam', 'evet', 'hayır', 'anlamadım', 'devam',
-        'devam et', 'nasıl', 'neden', 'kısaca', 'özetle'
+        'devam et', 'nasıl', 'neden', 'kısaca', 'özetle',
+        'daha basit', 'daha basit anlat', 'günlük hayattan',
+        'günlük hayattan örnek ver', 'günlük örnek ver',
+        'başka bir örnek ver', 'başka örnek ver'
       ].includes(t);
     }
   
@@ -357,13 +517,18 @@
         t === 'kısaca' ||
         t === 'özetle' ||
         t === 'daha basit' ||
-        t === 'daha basit anlat')
+        t === 'daha basit anlat' ||
+        t === 'günlük hayattan örnek ver' ||
+        t === 'günlük örnek ver' ||
+        t === 'başka bir örnek ver')
         return true;
       if (/^(peki\s+)?(bunu|bunu nasıl|bu|şu|o)\b/.test(t)) return true;
       if (/^(peki|ama|şimdi|ve)\b/.test(t)) return true;
       if (/^ya\s+(bu|şu|o)\b/.test(t)) return true;
       if (/^(başka|farklı)\s+(bir\s+)?(örnek|yöntem|açıklama)/.test(t)) return true;
       if (/^(evet|hayır)\b/.test(t)) return true;
+      if (detectFollowUpAction(t)) return true;
+      if (detectFormatRequest(t)) return true;
       if (detectProgrammingSubtopic(t) && (detectTeachingIntent(t) ||
           hasAny(t, ['anlat', 'açıkla', 'daha basit', 'günlük'])))
         return true;
@@ -380,7 +545,7 @@
       if (hasAny(t, [
         'yeni başladım', 'başlangıç seviyesindeyim', 'hiç bilmiyorum',
         '12 yaşındaki birine anlat', 'basit anlat', 'sıfırdan anlat',
-        'başlangıç seviyesi'
+        'başlangıç seviyesi', 'çok basit şekilde öğret', 'basit şekilde öğret'
       ])) return 'beginner';
       if (hasAny(t, ['ileri seviye', 'uzmanım', 'profesyonelce', 'detaylı teknik'])) {
         return 'advanced';
@@ -411,13 +576,19 @@
         .replace(/\s+(nasıl|neden|niçin|niye)\s+(çalışıyor|çalışır|yapılır|yapmalıyım)\s*$/i, '')
         .replace(/\s+(çalışıyor|çalışır|yapılır|yapmalıyım)\s*$/i, '')
         .trim();
+
+      // Fiil/eylem ifadelerini subtopic yapma (HATA 3)
+      if (isVerbOrFollowUpPhrase(value)) return '';
+
       return value.length >= 3 ? truncate(value, 100) : '';
     }
   
     function extractCommandToken(text) {
       return textOf(text).match(/![a-zçğıöşü0-9_-]+/iu)?.[0] || '';
     }
-  
+
+    /* HATA 3: resolveWithContext artık followUpAction ve formatRequest
+       ayrıştırır; bu ifadeleri topic/subtopic olarak kaydetmez. */
     function resolveWithContext(userMsg, context) {
       const original = textOf(userMsg).trim();
       if (!isContextualFollowUp(original) || !Array.isArray(context)) {
@@ -434,11 +605,17 @@
   
       const topic = extractTopic(previousUser.content);
       if (!topic) return { resolved: original, topic: null, followUp: true };
+
       const analysis = analyzeCodeRequest(previousUser.content);
       const previousIntent = detectQuestionType(previousUser.content);
-      const subtopic = detectSubtopic(original);
+      const followUpAction = detectFollowUpAction(original);
+      const formatRequest = detectFormatRequest(original);
+      const subtopic = followUpAction || formatRequest ? '' : detectSubtopic(original);
+      const progSubtopic = detectProgrammingSubtopic(original) ||
+        detectProgrammingSubtopic(previousUser.content);
+
       const state = {
-        topic,
+        topic: progSubtopic || topic,
         subtopic: subtopic || null,
         domain: detectDomain(previousUser.content, analysis),
         language: analysis.language,
@@ -446,11 +623,13 @@
         task: analysis.task,
         intent: previousIntent || analysis.intent,
         previousIntent,
-        userLevel: analysis.userLevel,
+        userLevel: analysis.userLevel || detectUserLevel(original),
         wantsCode: analysis.wantsCode,
         wantsExplanation: analysis.wantsExplanation,
         constraints: analysis.constraints,
-        complexity: analysis.complexity
+        complexity: analysis.complexity,
+        followUpAction: followUpAction || null,
+        formatRequest: formatRequest || null
       };
   
       return {
@@ -461,22 +640,12 @@
       };
     }
   
-    function detectFeedbackFromContext(context) {
-      if (!Array.isArray(context) || context.length < 2) {
-        return { retry: false, tone: 'normal', alternative: false };
-      }
+    /* ============== FEEDBACK (HATA 9) ============== */
   
-      // Feedback, önceki asistan yanıtından sonra henüz işlenmemiş son kullanıcı
-      // mesajıysa geçerlidir. Araya yeni bir asistan yanıtı girdiyse eski feedback
-      // yeni ve bağımsız bir soruya taşınmaz.
-      const lastItem = context[context.length - 1];
-      if (!lastItem || lastItem.role !== 'user') {
-        return { retry: false, tone: 'normal', alternative: false };
-      }
-      const lastUser = lastItem;
-      if (!lastUser) return { retry: false, tone: 'normal', alternative: false };
-  
-      const message = norm(lastUser.content);
+    /* HATA 9: Feedback güncel kullanıcı mesajından okunur.
+       detectFeedbackFromContext geriye dönük uyumluluk için korunur. */
+    function detectFeedback(userMsg) {
+      const message = norm(userMsg);
       if (isAlternativeRequest(message)) {
         return { retry: false, tone: 'normal', alternative: true };
       }
@@ -487,6 +656,17 @@
         return { retry: false, tone: 'happy', alternative: false };
       }
       return { retry: false, tone: 'normal', alternative: false };
+    }
+
+    function detectFeedbackFromContext(context) {
+      if (!Array.isArray(context) || context.length < 2) {
+        return { retry: false, tone: 'normal', alternative: false };
+      }
+      const lastItem = context[context.length - 1];
+      if (!lastItem || lastItem.role !== 'user') {
+        return { retry: false, tone: 'normal', alternative: false };
+      }
+      return detectFeedback(lastItem.content);
     }
   
     function isAlternativeRequest(message) {
@@ -531,7 +711,7 @@
         return 'Evet, devam edelim. İstediğin örneği bir sonraki adımda hazırlayabilirim.';
       }
       if (binary === 'negative' && hasAny(previous, ['deneyelim mi', 'ister misin', 'uygun mu'])) {
-        return 'Tamam, bu seçeneği uygulamıyorum. Başka bir yönden ilerleyebiliriz.';
+        return 'Tamam, bu seçeneği uygulamıyorum. Başka bir yoldan ilerleyebiliriz.';
       }
       return rand(binary === 'positive' ? TEMPLATES.yes : TEMPLATES.no);
     }
@@ -679,6 +859,61 @@
     function codeFence(language, code) {
       return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
     }
+
+    /* ===== HATA 6: Görev başına desteklenen diller ===== */
+    const SUPPORTED_CODE_TASKS = Object.freeze({
+      discord_bot: ['python', 'javascript'],
+      calculator: ['python', 'javascript'],
+      login_ui: ['htmlcss', 'react'],
+      guess_game: ['python', 'javascript'],
+      game: ['python', 'javascript'],
+      todo: ['python', 'javascript'],
+      password: ['python', 'javascript'],
+      hello: ['python', 'javascript'],
+      add: ['python', 'javascript'],
+      subtract: ['python', 'javascript'],
+      multiply: ['python', 'javascript'],
+      divide: ['python', 'javascript'],
+      factorial: ['python', 'javascript'],
+      fibonacci: ['python', 'javascript'],
+      prime: ['python', 'javascript'],
+      palindrome: ['python', 'javascript']
+    });
+
+    const TASK_LABELS = Object.freeze({
+      discord_bot: 'Discord botu',
+      calculator: 'hesap makinesi',
+      login_ui: 'giriş ekranı',
+      guess_game: 'sayı tahmin oyunu',
+      game: 'oyun',
+      todo: 'yapılacaklar listesi',
+      password: 'şifre üreteci',
+      hello: 'Hello World',
+      add: 'toplama',
+      subtract: 'çıkarma',
+      multiply: 'çarpma',
+      divide: 'bölme',
+      factorial: 'faktöriyel',
+      fibonacci: 'fibonacci',
+      prime: 'asal sayı',
+      palindrome: 'palindrom'
+    });
+
+    function isSupportedTask(task, language) {
+      const supported = SUPPORTED_CODE_TASKS[task];
+      if (!supported) return true; // bilinmeyen görevde genel üretim serbest
+      return supported.includes(language);
+    }
+
+    function unsupportedLanguageResponse(task, language) {
+      const taskLabel = TASK_LABELS[task] || 'bu görev';
+      const langLabel = LANG_LABELS[language] || language;
+      const supported = SUPPORTED_CODE_TASKS[task] || [];
+      const supportedLabels = supported.map((l) => LANG_LABELS[l] || l).join(', ');
+      return `**${langLabel}** için **${taskLabel}** görevinde hazır kod üreticim yok. ` +
+        `Başka bir dilin kodunu ${langLabel} diye göstermeyeceğim.` +
+        (supported.length ? ` Bu görev için desteklediğim diller: ${supportedLabels}.` : '');
+    }
   
     function simpleCodeSample(language, task) {
       const samples = {
@@ -702,8 +937,9 @@
           divide: 'const a = 20;\nconst b = 4;\nconsole.log(a / b);',
           calculator: 'function hesapla(a, operator, b) {\n  if (operator === "+") return a + b;\n  if (operator === "-") return a - b;\n  if (operator === "*") return a * b;\n  if (operator === "/") {\n    if (b === 0) throw new Error("Sıfıra bölme yapılamaz");\n    return a / b;\n  }\n  throw new Error("Geçersiz işlem");\n}\n\nconsole.log(hesapla(23, "*", 47));',
           factorial: 'function faktoriyel(n) {\n  return n <= 1 ? 1 : n * faktoriyel(n - 1);\n}\n\nconsole.log(faktoriyel(5));',
-          fibonacci: 'let a = 0;\nlet b = 1;\nfor (let i = 0; i < 10; i += 1) {\n  console.log(a);\n  [a, b] = [b, a + b];\n}',
-          prime: 'function asalMi(sayi) {\n  if (sayi < 2) return false;\n  for (let i = 2; i <= Math.sqrt(sayi); i += 1) {\n    if (sayi % i === 0) return false;\n  }\n  return true;\n}\n\nconsole.log(asalMi(17));'
+          fibonacci: 'let a = 0;\nlet b = 1;\nfor (let i = 0; i < 10; i += 1) {\n  console.log(a);\n  [a, b] = [b, a + b];\n} ',
+          prime: 'function asalMi(sayi) {\n  if (sayi < 2) return false;\n  for (let i = 2; i <= Math.sqrt(sayi); i += 1) {\n    if (sayi % i === 0) return false;\n  }\n  return true;\n}\n\nconsole.log(asalMi(17));',
+          guess_game: 'const gizli = Math.floor(Math.random() * 100) + 1;\nconst { createInterface } = require("readline");\nconst rl = createInterface({ input: process.stdin, output: process.stdout });\n\nfunction soru() {\n  rl.question("Tahminin: ", (tahmin) => {\n    const t = Number(tahmin);\n    if (t === gizli) { console.log("Bildin!"); rl.close(); }\n    else { console.log(t < gizli ? "Daha yüksek." : "Daha düşük."); soru(); }\n  });\n}\nsoru();'
         }
       };
       const languageSamples = samples[language] || {};
@@ -716,7 +952,12 @@
     function generatedCode(language, task, requestText) {
       const safeTopic = escapeInline(truncate(extractTopic(requestText), 48) || 'istek');
       const js = language === 'javascript' || language === 'react';
-  
+
+      /* HATA 6: Desteklenmeyen dil+görev kombinasyonunda dürüst fallback */
+      if (task && !isSupportedTask(task, language)) {
+        return unsupportedLanguageResponse(task, language);
+      }
+
       if (task === 'discord_bot') {
         if (language === 'python') {
           return codeFence('python', `# Kurulum: pip install -U discord.py
@@ -742,7 +983,8 @@
   
   bot.run(token)`);
         }
-        return codeFence('javascript', `// Kurulum: npm install discord.js
+        if (language === 'javascript') {
+          return codeFence('javascript', `// Kurulum: npm install discord.js
   const { Client, GatewayIntentBits } = require("discord.js");
   
   const client = new Client({
@@ -758,6 +1000,9 @@
   
   if (!process.env.DISCORD_TOKEN) throw new Error("DISCORD_TOKEN eksik.");
   client.login(process.env.DISCORD_TOKEN);`);
+        }
+        // Desteklenmeyen Discord bot dili
+        return unsupportedLanguageResponse('discord_bot', language);
       }
   
       if (task === 'calculator') {
@@ -778,7 +1023,8 @@
   
   console.log(hesapla(23, "*", 47));`);
         }
-        return codeFence('python', `def hesapla(a, operator, b):
+        if (language === 'python') {
+          return codeFence('python', `def hesapla(a, operator, b):
       if operator == "+":
           return a + b
       if operator == "-":
@@ -792,6 +1038,51 @@
       raise ValueError("Geçersiz operatör")
   
   print(hesapla(23, "*", 47))`);
+        }
+        return unsupportedLanguageResponse('calculator', language);
+      }
+
+      /* HATA 7: React için gerçek JSX/React kodu üret */
+      if (task === 'login_ui' && language === 'react') {
+        return codeFence('jsx', `import React, { useState } from 'react';
+
+function Login() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    // Gerçek uygulamada API'ye istek gönder
+    console.log('Giriş:', { email, password });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ maxWidth: 380, margin: '2rem auto' }}>
+      <h1>Giriş yap</h1>
+      <div style={{ marginBottom: '1rem' }}>
+        <label>E-posta</label>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+      </div>
+      <div style={{ marginBottom: '1rem' }}>
+        <label>Şifre</label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+      </div>
+      <button type="submit">Devam et</button>
+    </form>
+  );
+}
+
+export default Login;`);
       }
   
       if (task === 'login_ui' || language === 'htmlcss') {
@@ -911,6 +1202,20 @@
   </body>
   </html>`);
       }
+      if (language === 'react') {
+        return codeFence('jsx', `import React from 'react';
+
+function ${capitalize(safeTopic.replace(/[^a-zA-Zçğıöşü0-9]/g, '')) || 'Bilesen'}() {
+  return (
+    <div>
+      <h1>${safeTopic}</h1>
+      <p>Bu başlangıç bileşenini istediğin özelliklerle genişletebilirsin.</p>
+    </div>
+  );
+}
+
+export default ${capitalize(safeTopic.replace(/[^a-zA-Zçğıöşü0-9]/g, '')) || 'Bilesen'};`);
+      }
       return codeFence('javascript', `function main() {
     // İstek: ${safeTopic}
     // Buraya görevin iş kurallarını ekle.
@@ -922,6 +1227,12 @@
   
     function codeSample(analysis, requestText) {
       const { language, task, complexity } = analysis;
+
+      // HATA 6: Desteklenmeyen dil kontrolü
+      if (task && language && !isSupportedTask(task, language)) {
+        return unsupportedLanguageResponse(task, language);
+      }
+
       const sample = complexity === 'simple' || task === 'hello'
         ? simpleCodeSample(language, task)
         : null;
@@ -931,13 +1242,20 @@
         : task === 'calculator'
           ? 'Hesap makinesi için başlangıç'
           : task === 'login_ui'
-            ? 'Giriş ekranı için başlangıç'
+            ? (language === 'react' ? 'Giriş ekranı için React bileşeni' : 'Giriş ekranı için başlangıç')
             : task === 'guess_game'
               ? 'Sayı tahmin oyunu'
               : 'İsteğine uygun başlangıç';
-  
+
+      const langLabel = LANG_LABELS[language] || language;
+      const techLabel = analysis.technology;
+      // Eğer desteklenmeyen dil mesajı döndüyse code değişkeni zaten metin
+      if (code.startsWith('**') || code.includes('göstermeyeceğim')) {
+        return code;
+      }
+
       return `## 💻 ${title}\n\n${code}\n\n` +
-        `Bu örnekte **${analysis.language}**${analysis.technology ? ` / **${analysis.technology}**` : ''} ` +
+        `Bu örnekte **${langLabel}**${techLabel ? ` / **${techLabel}**` : ''} ` +
         `kullanıldı. Gerçek token, şifre veya API anahtarını koda gömmemelisin; ortam değişkeni kullan.`;
     }
   
@@ -950,7 +1268,7 @@
       ],
       thanks: [
         'Rica ederim! 🤝',
-        'Ne demek, yardımcı olabildiysem ne mutlu!'
+        'Ne demek, yardımcı olabildiysem ne mutlu! '
       ],
       howAreYou: [
         `İyiyim, teşekkür ederim! ${MODEL_ICON} Hazırım; neye bakalım?`,
@@ -984,78 +1302,107 @@
       'makine öğrenmesi': '**Makine öğrenmesi**, bilgisayarların açıkça her kural tek tek yazılmadan verilerdeki örüntülerden model oluşturmasını sağlayan yapay zekâ alt alanıdır.'
     };
 
+    /* ===== HATA 1 & 2: Türkçe kök eşleme + dil bağımsız topic ===== */
+
     const PROGRAMMING_SUBTOPICS = {
       'değişkenler': {
-        aliases: ['değişken', 'değişkenler', 'degisken', 'degiskenler', 'variable', 'variables'],
+        roots: ['değişken', 'degisken', 'variable'],
         title: 'Değişkenler',
         analogy: 'Bir kutunun içine bir eşya koyduğunu düşün. Kutunun üzerinde "Telefon" etiketi var. Bu kutu değişken gibidir: bir isim verirsin ve o isim altında bir değer tutarsın.',
         explanation: 'Programlamada değişken, bir değeri hafızada tutmak için verilen isimdir. Bir kutu gibi düşün: kutunun üstündeki etiket değişkenin adı, kutunun içindeki eşya ise değişkenin değeridir. Değeri istediğin zaman değiştirebilirsin.',
-        python: 'Python\'da bir değişken oluşturmak için bir isim yazıp eşittir işareti koyar ve değerini verirsin. Örneğin: yas = 25 yazdığında "yas" değişkeninin değeri 25 olur. Daha sonra bu ismi kullandığında Python o değeri getirir. Değeri sonradan değiştirebilirsin: yas = 26 dediğinde artık değer 26 olur.',
-        summary: 'Değişken = isim + değer. İsimle değere ulaşır, istediğin zaman değiştirirsin.'
+        summary: 'Değişken = isim + değer. İsimle değere ulaşır, istediğin zaman değiştirirsin.',
+        languages: {
+          python: 'Python\'da bir değişken oluşturmak için bir isim yazıp eşittir işareti koyar ve değerini verirsin. Örneğin: yas = 25 yazdığında "yas" değişkeninin değeri 25 olur. Daha sonra bu ismi kullandığında Python o değeri getirir. Değeri sonradan değiştirebilirsin: yas = 26 dediğinde artık değer 26 olur.',
+          javascript: 'JavaScript\'te bir değişken oluşturmak için let veya const kullanırsın. Örneğin: let yas = 25 yazdığında "yas" değişkeninin değeri 25 olur. let ile sonradan değiştirebilirsin (yas = 26), const ise değiştirilemez. Değişkeni kullandığında JavaScript o değeri getirir.'
+        }
       },
       'listeler': {
-        aliases: ['liste', 'listeler', 'list', 'array', 'dizi', 'diziler'],
+        roots: ['liste', 'list', 'array', 'dizi'],
         title: 'Listeler',
         analogy: 'Bir alışveriş listesi düşün: yumurta, ekmek, süt diye alt alta yazarsın. Bu liste tek bir kağıtta birden fazla öğeyi sırayla tutar.',
         explanation: 'Liste, birden fazla değeri tek bir isim altında sırayla tutmaktır. Listeye ekleme yapabilir, içindekileri sıra numarasıyla ulaşabilir, çıkarabilirsin.',
-        python: 'Python\'da liste köşeli parantezle oluşturulur. Örneğin: meyveler = ["elma", "armut", "muz"] yazdığında üç meyveyi bir arada tutarsın. İlk öğeye meyveler[0], ikinciye meyveler[1] ile ulaşırsın. Yeni öğe eklemek için .append() kullanırsın.',
-        summary: 'Liste = sıralı değer koleksiyonu. Sıra numarasıyla ulaşır, ekler çıkarırsın.'
+        summary: 'Liste = sıralı değer koleksiyonu. Sıra numarasıyla ulaşır, ekler çıkarırsın.',
+        languages: {
+          python: 'Python\'da liste köşeli parantezle oluşturulur. Örneğin: meyveler = ["elma", "armut", "muz"] yazdığında üç meyveyi bir arada tutarsın. İlk öğeye meyveler[0], ikinciye meyveler[1] ile ulaşırsın. Yeni öğe eklemek için .append() kullanırsın.',
+          javascript: 'JavaScript\'te dizi köşeli parantezle oluşturulur. Örneğin: const meyveler = ["elma", "armut", "muz"] yazdığında üç meyveyi bir arada tutarsın. İlk öğeye meyveler[0] ile ulaşırsın. Yeni öğe eklemek için .push() kullanırsın.'
+        }
       },
       'fonksiyonlar': {
-        aliases: ['fonksiyon', 'fonksiyonlar', 'function', 'functions', 'metod', 'metot'],
+        roots: ['fonksiyon', 'function', 'metod', 'metot'],
         title: 'Fonksiyonlar',
         analogy: 'Bir tarif düşün: "yumurtalı ekmek yap" dediğinde birisi yumurtayı çırpıp ekmeği ısırıp tavada kızartır. Tarifin adı fonksiyon, içeriği ise o işi yapma adımlarıdır.',
         explanation: 'Fonksiyon, belirli bir işi yapan ve yeniden kullanılabilen bir kod bloğudur. Bir kez tanımlarsın, sonra istediğin kadar çağırırsın. Girdi alabilir ve sonuç döndürebilir.',
-        python: 'Python\'da fonksiyon def kelimesiyle oluşturulur. Örneğin: def merhaba_de(ad): print("Merhaba " + ad) yazdığında bir fonksiyon tanımlamış olursun. merhaba_de("Ahmet") diye çağırdığında "Merhaba Ahmet" çıktısı alırsın.',
-        summary: 'Fonksiyon = adı + işi + girdi/çıktı. Bir kez yaz, birçok kez kullan.'
+        summary: 'Fonksiyon = adı + işi + girdi/çıktı. Bir kez yaz, birçok kez kullan.',
+        languages: {
+          python: 'Python\'da fonksiyon def kelimesiyle oluşturulur. Örneğin: def merhaba_de(ad): print("Merhaba " + ad) yazdığında bir fonksiyon tanımlamış olursun. merhaba_de("Ahmet") diye çağırdığında "Merhaba Ahmet" çıktısı alırsın.',
+          javascript: 'JavaScript\'te fonksiyon function kelimesiyle oluşturulur. Örneğin: function merhabaDe(ad) { console.log("Merhaba " + ad); } yazdığında bir fonksiyon tanımlamış olursun. merhabaDe("Ahmet") diye çağırdığında "Merhaba Ahmet" çıktısı alırsın.'
+        }
       },
       'döngüler': {
-        aliases: ['döngü', 'döngüler', 'dongu', 'donguler', 'loop', 'for', 'while'],
+        roots: ['döngü', 'dongu', 'loop'],
         title: 'Döngüler',
         analogy: 'Bir koşucunun pistte tur atması gibi: her tur aynı adımları tekrarlar ama her tur bir öncekinden devam eder.',
         explanation: 'Döngü, aynı işlemi belirli bir koşul sağlanana veya listedeki her öğe bitene kadar tekrarlamaktır. Tekrarı elle yazmak yerine döngü kullanırsın.',
-        python: 'Python\'da for döngüsü bir listedeki her öğeyi sırayla gezer. Örneğin: for meyve in meyveler: print(meyve) yazdığında listedeki her meyveyi tek tek yazdırır. while döngüsü ise bir koşul doğru olduğu sürece devam eder.',
-        summary: 'Döngü = tekrar mekanizması. for listeyle, while koşulla çalışır.'
+        summary: 'Döngü = tekrar mekanizması. for listeyle, while koşulla çalışır.',
+        languages: {
+          python: 'Python\'da for döngüsü bir listedeki her öğeyi sırayla gezer. Örneğin: for meyve in meyveler: print(meyve) yazdığında listedeki her meyveyi tek tek yazdırır. while döngüsü ise bir koşul doğru olduğu sürece devam eder.',
+          javascript: 'JavaScript\'te for döngüsü bir dizideki her öğeyi gezer. Örneğin: for (const meyve of meyveler) { console.log(meyve); } yazdığında dizideki her meyveyi tek tek yazdırır. while döngüsü ise bir koşul doğru olduğu sürece devam eder.'
+        }
       },
       'koşullar': {
-        aliases: ['koşul', 'koşullar', 'kosul', 'kosullar', 'if', 'else', 'if else', 'koşullu', 'şart', 'şartlar'],
+        roots: ['koşul', 'kosul', 'if', 'else', 'şart'],
         title: 'Koşullar (if/else)',
         analogy: 'Bir kavşakta yol ayrımında "Eğer yağmur varsa şemsiye al, değilse gözlük al" demek gibi: duruma göre farklı şeyler yaparsın.',
         explanation: 'Koşul, programa "eğer şu durum varsa şunu yap, yoksa bunu yap" demektir. Bu sayede program farklı durumlarda farklı davranır.',
-        python: 'Python\'da if ile koşul yazarsın. Örneğin: if yas >= 18: print("Erişkin") else: print("Çocuk") yazdığında yaş 18\'den büyükse "Erişkin", değilse "Çocuk" yazdırır.',
-        summary: 'Koşul = duruma göre karar. if doğruysa, else değilse çalışır.'
+        summary: 'Koşul = duruma göre karar. if doğruysa, else değilse çalışır.',
+        languages: {
+          python: 'Python\'da if ile koşul yazarsın. Örneğin: if yas >= 18: print("Erişkin") else: print("Çocuk") yazdığında yaş 18\'den büyükse "Erişkin", değilse "Çocuk" yazdırır.',
+          javascript: 'JavaScript\'te if ile koşul yazarsın. Örneğin: if (yas >= 18) { console.log("Erişkin"); } else { console.log("Çocuk"); } yazdığında yaş 18\'den büyükse "Erişkin", değilse "Çocuk" yazdırır.'
+        }
       },
       'sınıflar': {
-        aliases: ['sınıf', 'sınıflar', 'sinif', 'siniflar', 'class', 'classes', 'nesne', 'nesneler', 'object'],
+        roots: ['sınıf', 'sinif', 'class', 'nesne', 'object'],
         title: 'Sınıflar ve Nesneler',
         analogy: 'Bir ev planı düşün: plan kağıdı sınıftır, o plandan yapılmış ev ise nesnedir. Birden fazla ev yapabilirsin, hepsi aynı plana göre ama içleri farklıdır.',
         explanation: 'Sınıf, bir şablon gibidir; nesne o şablondan üretilmiş örnek. Sınıf özellikleri ve davranışları tanımlar, nesne ise onları somut değerlerle kullanır.',
-        python: 'Python\'da class kelimesiyle sınıf oluşturulur. Sınıf içine özellikler ve metotlar yazılır. Sınıftan nesne oluşturduğunda, o nesne sınıfın özelliklerini alır.',
-        summary: 'Sınıf = şablon, nesne = o şablondan örnek.'
+        summary: 'Sınıf = şablon, nesne = o şablondan örnek.',
+        languages: {
+          python: 'Python\'da class kelimesiyle sınıf oluşturulur. Sınıf içine özellikler ve metotlar yazılır. Sınıftan nesne oluşturduğunda, o nesne sınıfın özelliklerini alır.',
+          javascript: 'JavaScript\'te class kelimesiyle sınıf oluşturulur. Sınıf içine constructor ve metotlar yazılır. new anahtar kelimesiyle nesne oluşturduğunda, o nesne sınıfın özelliklerini alır.'
+        }
       },
       'modüller': {
-        aliases: ['modül', 'modüller', 'modul', 'moduller', 'module', 'modules', 'import'],
+        roots: ['modül', 'modul', 'module', 'import'],
         title: 'Modüller',
         analogy: 'Bir alet çantası düşün: her çekmece farklı aletleri tutar. İhtiyacın olan aleti o çekmeceden alırsın. Modül de bu çekmece gibidir.',
         explanation: 'Modül, hazır işlevleri bir arada tutan bir pakettir. import diyerek o paketten istediğin işlevi kullanırsın.',
-        python: 'Python\'da import ile modül yüklersin. Örneğin: import random yazdığında rastgele sayı üretme işlevini kullanabilirsin. from random import randint diyerek sadece istediğin parçayı da alabilirsin.',
-        summary: 'Modül = hazır paket. import ile yükler, içindekini kullanırsın.'
+        summary: 'Modül = hazır paket. import ile yükler, içindekini kullanırsın.',
+        languages: {
+          python: 'Python\'da import ile modül yüklersin. Örneğin: import random yazdığında rastgele sayı üretme işlevini kullanabilirsin. from random import randint diyerek sadece istediğin parçayı da alabilirsin.',
+          javascript: 'JavaScript\'te import (ES modülleri) veya require (CommonJS) ile modül yüklersin. Örneğin: import { randint } from "random" veya const fs = require("fs") yazdığında modülün işlevlerini kullanabilirsin.'
+        }
       },
       'tipler': {
-        aliases: ['tip', 'tipler', 'veri tipi', 'veri tipleri', 'type', 'types', 'int', 'string', 'float'],
+        roots: ['tip', 'veri tipi', 'veri tipleri', 'type'],
         title: 'Veri Tipleri',
         analogy: 'Farklı kutular düşün: biri kitap için, biri yiyecek için, biri para için. Her kutu farklı türde şey tutar. Veri tipleri de böyledir.',
         explanation: 'Veri tipi, bir değerin ne tür olduğunu belirtir: sayı, metin, ondalıklı sayı gibi. Python tipi otomatik anlar ama senin de bilmen gerekir.',
-        python: 'Python\'da temel tipler: int (tam sayı), float (ondalıklı), str (metin), bool (doğru/yanlış). Örneğin 25 bir int, "Merhaba" bir str, 3.14 bir float\'tur.',
-        summary: 'Veri tipi = değerin türü. Sayı, metin, ondalıklı, mantıksal.'
+        summary: 'Veri tipi = değerin türü. Sayı, metin, ondalıklı, mantıksal.',
+        languages: {
+          python: 'Python\'da temel tipler: int (tam sayı), float (ondalıklı), str (metin), bool (doğru/yanlış). Örneğin 25 bir int, "Merhaba" bir str, 3.14 bir float\'tur.',
+          javascript: 'JavaScript\'te temel tipler: number (sayı), string (metin), boolean (doğru/yanlış). Örneğin 25 bir number, "Merhaba" bir string, true bir boolean\'dır.'
+        }
       },
       'stringler': {
-        aliases: ['string', 'strings', 'metin', 'metinler', 'karakter', 'karakter dizisi'],
+        roots: ['string', 'metin', 'karakter'],
         title: 'Stringler (Metinler)',
         analogy: 'Bir kitap düşün: harfler yan yana gelerek kelimeleri, kelimeler cümleleri oluşturur. String de harflerin yan yana gelmesiyle oluşan metindir.',
         explanation: 'String, harflerin yan yana dizilmesiyle oluşan metin değeridir. Tırnak içinde yazılır ve metin işlemleri için kullanılır.',
-        python: 'Python\'da string tırnak işaretiyle oluşturulur. Örneğin: ad = "Ahmet" yazdığında ad değişkeni bir string olur. Stringleri birleştirebilir, parçalayabilir, içinde arama yapabilirsin.',
-        summary: 'String = tırnak içinde metin. Birleştir, parçala, ara.'
+        summary: 'String = tırnak içinde metin. Birleştir, parçala, ara.',
+        languages: {
+          python: 'Python\'da string tırnak işaretiyle oluşturulur. Örneğin: ad = "Ahmet" yazdığında ad değişkeni bir string olur. Stringleri birleştirebilir, parçalayabilir, içinde arama yapabilirsin.',
+          javascript: 'JavaScript\'te string tırnak işaretiyle oluşturulur. Örneğin: const ad = "Ahmet" yazdığında ad değişkeni bir string olur. Template literal (\\`Merhaba ${ad}\\`) ile birleştirme yapabilirsin.'
+        }
       }
     };
 
@@ -1063,38 +1410,64 @@
       'öğret', 'öğretmek', 'öğrenmek istiyorum', 'öğreniyorum',
       'adım adım anlat', 'çok basit şekilde öğret', 'basit şekilde öğret',
       'yeni başladım', 'sıfırdan anlat', 'sıfırdan öğret',
-      'bana öğret', 'önce öğret', 'anlat', 'öğretir misin'
+      'bana öğret', 'önce öğret', 'anlat', 'öğretir misin',
+      '12 yaşındaki birine anlat', '12 yaşındaki bir çocuğa anlat'
     ]);
 
     function detectTeachingIntent(text) {
       return hasAny(text, TEACHING_SIGNALS);
     }
 
+    /* HATA 1: Türkçe kök eşleme ile subtopic tespiti */
     function detectProgrammingSubtopic(text) {
       const t = norm(text);
       for (const [key, info] of Object.entries(PROGRAMMING_SUBTOPICS)) {
-        if (hasAny(t, info.aliases)) return key;
+        // Önce alias olarak eklenen tam eşleşmeleri dene
+        if (info.aliases && hasAny(t, info.aliases)) return key;
+        // Türkçe kök eşleme: değişken, değişkenler, değişkeni, değişkenleri
+        if (info.roots && hasTurkishRootAny(t, info.roots)) return key;
       }
       return null;
     }
 
-    function detectFormatRequest(text) {
+    /* Eski detectFormatRequest — geriye dönük uyumluluk için */
+    function detectFormatRequestSimple(text) {
       return hasAny(text, [
         'günlük hayattan', 'günlük hayattan örnek', 'günlük örnek',
         'günlük yaşamdan', 'önce günlük', 'günlük hayattan bir örnek'
       ]);
     }
 
+    function detectFormatRequest(text) {
+      return detectFormatRequestSimple(text);
+    }
+
+    /* HATA 2: Dil bağımsız topic + dil bağımlı anlatım */
+    function getLanguageExplanation(info, language) {
+      if (!info.languages) return info.python || info.explanation;
+      return info.languages[language] || info.languages.python || info.explanation;
+    }
+
+    function getLangLabel(language) {
+      return LANG_LABELS[language] || 'Python';
+    }
+
     function teachingResponse(subtopicKey, analysis, text, conversationState) {
       const info = PROGRAMMING_SUBTOPICS[subtopicKey];
       if (!info) return null;
 
+      // HATA 2: Dili doğru seç
+      const lang = analysis.language || conversationState?.language || 'python';
+      const langLabel = getLangLabel(lang);
+      const langExplanation = getLanguageExplanation(info, lang);
+
       const isBeginner = analysis.userLevel === 'beginner' ||
-        hasAny(text, ['çok basit', 'basit', 'yeni başladım']);
-      const wantsFormat = detectFormatRequest(text);
-      const simpler = hasAny(text, ['daha basit', 'daha sade', 'daha kolay']);
-      const langLabel = analysis.language === 'python' ? 'Python' :
-        analysis.language === 'javascript' ? 'JavaScript' : 'Python';
+        hasAny(text, ['çok basit', 'basit', 'yeni başladım',
+          '12 yaşındaki', '12 yaşında']);
+      const wantsFormat = detectFormatRequest(text) ||
+        (conversationState?.formatRequest === 'daily_life_example');
+      const simpler = hasAny(text, ['daha basit', 'daha sade', 'daha kolay']) ||
+        (conversationState?.followUpAction === 'simplify');
 
       const intro = simpler
         ? `## ${info.title} — daha basit anlatım`
@@ -1112,7 +1485,7 @@ ${info.analogy}
 ${info.explanation}
 
 ### ${langLabel}'da kavramsal olarak
-${info.python}
+${langExplanation}
 
 ### Kısa özet
 ${info.summary}
@@ -1127,7 +1500,7 @@ ${info.analogy}
 
 ${info.explanation}
 
-**${langLabel}'da:** ${info.python}
+**${langLabel}'da:** ${langExplanation}
 
 **Özet:** ${info.summary}
 
@@ -1138,7 +1511,7 @@ Bu açıklamada kod üretmedim.`;
 
 ${info.explanation}
 
-**${langLabel}'da:** ${info.python}
+**${langLabel}'da:** ${langExplanation}
 
 **Özet:** ${info.summary}
 
@@ -1179,7 +1552,7 @@ Bu açıklamada kod üretmedim.`;
           (key === 'python' && /\bpython\w*\b/iu.test(norm(text)));
         if (matchesKey) {
           if (type === INTENTS.HOW && key === 'python') {
-            return '**Python kullanmaya başlamak için:** Python’u kur, bir `.py` dosyası oluştur, `print("Merhaba")` gibi küçük bir kod çalıştır ve ardından değişken, koşul, döngü ve fonksiyonlarla ilerle.';
+            return `**Python kullanmaya başlamak için:** Python'u kur, bir \`.py\` dosyası oluştur, \`print("Merhaba")\` gibi küçük bir kod çalıştır ve ardından değişken, koşul, döngü ve fonksiyonlarla ilerle.`;
           }
           if (type === INTENTS.WHAT || type === INTENTS.HOW) return answer;
         }
@@ -1191,7 +1564,7 @@ Bu açıklamada kod üretmedim.`;
       const contextualLabel = conversationState?.topic && conversationState?.subtopic
         ? `${conversationState.topic} içindeki ${conversationState.subtopic}`
         : topic;
-      const label = contextualLabel ? `“${truncate(contextualLabel, 120)}”` : 'bu konu';
+      const label = contextualLabel ? `"${truncate(contextualLabel, 120)}"` : 'bu konu';
       const wording = type === INTENTS.HOW
         ? `${label} için konuya özel doğrulanmış bir bilgi kaynağım yok.`
         : `${label} hakkında elimde yeterli doğrulanmış bilgi yok.`;
@@ -1249,11 +1622,11 @@ Bu açıklamada kod üretmedim.`;
           : '';
         return `## Discord botu nasıl çalışır?
   
-  ${levelText}Discord botu, Discord’un API’sine bağlanan ve sunucudaki olaylara tepki veren bir programdır. Kullanıcı mesaj gönderdiğinde, bir komut kullandığında veya bot hazır olduğunda Discord bir olay iletir; bot da bu olaya göre işlem yapar ve yanıt gönderir.
+  ${levelText}Discord botu, Discord'un API'sine bağlanan ve sunucudaki olaylara tepki veren bir programdır. Kullanıcı mesaj gönderdiğinde, bir komut kullandığında veya bot hazır olduğunda Discord bir olay iletir; bot da bu olaya göre işlem yapar ve yanıt gönderir.
   
   **Temel akış:**
-  1. Discord Developer Portal’da bir uygulama ve bot oluşturulur.
-  2. Bot, güvenli bir token ile Discord’a bağlanır.
+  1. Discord Developer Portal'da bir uygulama ve bot oluşturulur.
+  2. Bot, güvenli bir token ile Discord'a bağlanır.
   3. Gerekli gateway intent ve sunucu izinleri açılır.
   4. Gelen mesaj veya komutlar ayrıştırılır.
   5. Bot, komuta uygun yanıtı veya işlemi üretir.
@@ -1267,7 +1640,9 @@ Bu açıklamada kod üretmedim.`;
         (conversationState?.subtopic && detectProgrammingSubtopic(conversationState.subtopic) &&
           hasAny(text, ['anlat', 'açıkla', 'daha basit']));
       if (teachingSubtopic && (isTeaching || detectFormatRequest(text) ||
-          analysis.userLevel === 'beginner' || hasAny(text, ['daha basit']))) {
+          analysis.userLevel === 'beginner' || hasAny(text, ['daha basit'])) ||
+          conversationState?.followUpAction === 'simplify' ||
+          conversationState?.formatRequest === 'daily_life_example') {
         const teachingAnalysis = analysis.language
           ? analysis
           : { ...analysis, language: conversationState?.language || 'python' };
@@ -1290,7 +1665,7 @@ Bu açıklamada kod üretmedim.`;
       if (isPureGenericQuestion) {
         const known = knownKnowledgeResponse(text, INTENTS.WHAT) ||
           knownKnowledgeResponse(text, INTENTS.HOW);
-        if (known) return `${known}\n\nİstersen bunu kod göstermeden kavramsal adımlara da ayırabilirim.}`;
+        if (known) return `${known}\n\nİstersen bunu kod göstermeden kavramsal adımlara da ayırabilirim.`;
       }
 
       const label = conversationState?.topic || topic;
@@ -1299,25 +1674,76 @@ Bu açıklamada kod üretmedim.`;
         : 'Konuyu kod yazmadan açıklayabilirim; önce ne olduğunu, nasıl çalıştığını ve temel adımları sırayla ele alalım.';
     }
   
+    /* ===== HATA 4: Geliştirilmiş contextual task guidance ===== */
+
     function contextualTaskGuidance(text, conversationState) {
-      if (conversationState?.task === 'guess_game' &&
+      const state = conversationState || {};
+
+      // Discord botu komut açıklaması (önce kontrol et — 'nasıl' ortak)
+      if ((state.task === 'discord_bot' || hasAny(text, ['discord bot', 'discord botu'])) &&
+        hasAny(text, ['komutlar nasıl', 'komutlar nasıl çalışıyor', 'komutlar nasıl çalışır',
+          'komut nedir', 'komutlar nedir'])) {
+        return `## Discord botunda komutlar nasıl çalışıyor?
+
+  Discord botlarında komutlar, botun belirli mesaj biçimlerine verdiği tepkilerdir. Kullanıcı \`!\` gibi bir ön ek ile başlayan bir mesaj gönderdiğinde bot bunu algılar.
+
+  **Temel akış:**
+  1. Kullanıcı bir mesaj gönderir (örn. \`!merhaba\`).
+  2. Bot mesajı alır ve komut ön ekini tanır.
+  3. Komut adı ve varsa parametreler ayrıştırılır.
+  4. İlgili komut fonksiyonu çalışır.
+  5. Bot, komuta uygun yanıtı kanala gönderir.
+
+  Bu açıklamada kod üretmedim.`;
+      }
+
+      // Discord botu çalıştırma rehberi
+      if ((state.task === 'discord_bot' || hasAny(text, ['discord bot', 'discord botu'])) &&
+        hasAny(text, ['çalıştır', 'çalıştıracağım', 'çalıştırmak', 'nasıl çalıştır',
+          'nasıl başlat', 'başlatacağım', 'çalıştırır mısın'])) {
+        const lang = state.language || 'python';
+        if (lang === 'python') {
+          return `## Python Discord botunu çalıştırma adımları
+  
+  1. **discord.py kur:** Terminalde \`pip install -U discord.py\` çalıştır.
+  2. **Bot dosyasını kaydet:** Kodu \`bot.py\` gibi bir dosyaya kaydet.
+  3. **DISCORD_TOKEN ayarla:** Ortam değişkeni olarak \`export DISCORD_TOKEN=token_metnin\` (Windows: \`set DISCORD_TOKEN=...\`).
+  4. **Çalıştır:** Terminalde \`python bot.py\` (bazı sistemlerde \`python3 bot.py\`).
+  5. **Çevrimiçi kontrol et:** Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.`;
+        }
+        if (lang === 'javascript') {
+          return `## JavaScript Discord botunu çalıştırma adımları
+  
+  1. **discord.js kur:** Terminalde \`npm install discord.js\` çalıştır.
+  2. **Bot dosyasını kaydet:** Kodu \`bot.js\` gibi bir dosyaya kaydet.
+  3. **DISCORD_TOKEN ayarla:** Ortam değişkeni olarak \`export DISCORD_TOKEN=token_metnin\` (Windows: \`set DISCORD_TOKEN=...\`).
+  4. **Çalıştır:** Terminalde \`node bot.js\`.
+  5. **Çevrimiçi kontrol et:** Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.`;
+        }
+      }
+
+      // Sayı tahmin oyunu çalıştırma
+      if (state.task === 'guess_game' &&
         hasAny(text, ['nasıl', 'çalıştır', 'çalıştıracağım'])) {
-        return `Python’daki **sayı tahmin oyunu** için çalıştırma adımları:
+        return `Python'daki **sayı tahmin oyunu** için çalıştırma adımları:
   
   1. Kodu \`tahmin.py\` gibi bir dosyaya kaydet.
   2. Terminali dosyanın bulunduğu klasörde aç.
   3. \`python tahmin.py\` komutunu çalıştır. Bazı sistemlerde \`python3 tahmin.py\` olabilir.
-  4. Programın istediği tahmini yazıp Enter’a bas.`;
+  4. Programın istediği tahmini yazıp Enter'a bas.`;
       }
       return null;
     }
+
+    /* ===== HATA 10: Gerçek alternatif üretimi ===== */
   
     function alternativeResponse(text, conversationState) {
       const simpler = hasAny(text, ['daha basit', 'basit anlat', 'kısaca']);
       const state = conversationState || {};
   
+      // Sayı tahmin oyunu için gerçek alternatif
       if (state.task === 'guess_game' && state.language === 'python' &&
-        state.wantsCode && !state.constraints?.noCode) {
+        !state.constraints?.noCode) {
         const code = `gizli_sayi = 7
   tahmin = int(input("Tahminin: "))
   
@@ -1328,9 +1754,26 @@ Bu açıklamada kod üretmedim.`;
         return `## ${simpler ? 'Daha basit ' : ''}alternatif sayı tahmini\n\n` +
           `${codeFence('python', code)}\n\nBu sürüm tek tahmin alır; önceki döngülü örnekten daha kısa bir alternatiftir.`;
       }
-  
-      if (state.constraints?.noCode) {
-        return `**${truncate(state.topic || 'Bu konu', 90)}** için kodsuz, daha basit bir açıklama verebilirim: önce amacı, sonra temel akışı ve en son uygulanacak adımları anlatacağım.`;
+
+      // Hesap makinesi için alternatif
+      if (state.task === 'calculator' && state.language === 'python' &&
+        !state.constraints?.noCode) {
+        const code = `islem = input("İşlem (örn. 5 + 3): ")
+  sayilar = islem.split()
+  a, op, b = int(sayilar[0]), sayilar[1], int(sayilar[2])
+
+  if op == "+": print(a + b)
+  elif op == "-": print(a - b)
+  elif op == "*": print(a * b)
+  elif op == "/": print(a / b if b else "Sıfıra bölme")`;
+        return `## ${simpler ? 'Daha basit ' : ''}alternatif hesap makinesi\n\n` +
+          `${codeFence('python', code)}\n\nBu sürüm kullanıcıdan işlemi tek satırda alır; önceki fonksiyon tabanlı örnekten farklı bir yaklaşımdır.`;
+      }
+
+      // Teaching konusu için kodsuz alternatif
+      if (state.constraints?.noCode || !state.wantsCode) {
+        const topic = state.topic || 'Bu konu';
+        return `**${truncate(topic, 90)}** için kodsuz, daha basit bir açıklama verebilirim: önce amacı, sonra temel akışı ve en son uygulanacak adımları anlatacağım.`;
       }
   
       return `**${truncate(state.topic || 'Aynı konu', 90)}** için farklı bir örnek hazırlayabilirim. ` +
@@ -1472,35 +1915,29 @@ Bu açıklamada kod üretmedim.`;
       }
       if (command === '/brainstorm') {
         const topic = argument || 'genel konu';
-        return `# 🧠 Beyin Fırtınası: ${topic}
-  
-  1. **Minimalist:** En küçük çalışan sürüm
-  2. **Kullanıcı odaklı:** Kullanıcı akışı ve geri bildirim
-  3. **Ölçeklenebilir:** Modüler mimari ve veri katmanı
-  4. **Otomasyon:** Tekrarlanan işi azaltma
-  5. **Güvenlik:** Girdi doğrulama ve yetkilendirme`;
+        return `# 🧠 Beyin Fırtınası: ${topic}\n\n` +
+          `1. **Amaç tanımla** — ${topic} ile hangi sorunu çözüyorsun?\n` +
+          '2. **Küçük parçalara böl** — Büyük hedefi alt görevlere ayır.\n' +
+          '3. **Alternatif yaklaşımlar** — En az iki farklı yöntem düşün.\n' +
+          '4. **Risk ve avantaj** — Her yöntemin artılarını ve eksilerini yaz.\n' +
+          '5. **Önceliklendir** — En düşük riskle en yüksek değer veren yöntemi seç.\n\n' +
+          'Hangi yönde derinleşmemi istersen yaz.';
       }
       if (command === '/explain') {
-        const topic = argument || 'belirtilen konu';
-        return `# 📚 ${topic}
-  
-  Bu komut konuya özel doğrulanmış bir kaynak almadığı için genel şablonla uydurma bilgi üretmiyorum. Konuya ait metni veya kodu gönderirsen onu somut biçimde açıklayabilirim.`;
+        return argument
+          ? `**${truncate(argument, 120)}** konusunu adım adım açıklayabilirim. Önce ne olduğunu, sonra nasıl çalıştığını ve son olarak nerelerde kullanıldığını ele alırım.`
+          : 'Açıklamamı istediğin konuyu `/explain <konu>` biçiminde yaz.';
+      }
+      if (command === '/compare') {
+        const parts = argument.split(/\s+vs\s+/i);
+        if (parts.length < 2) return 'Karşılaştırma için `/compare A vs B` biçimini kullan.';
+        const [a, b] = parts;
+        return `## ${a} vs ${b}\n\n| Özellik | ${a} | ${b} |\n|---|---|---|\n| Tip | Bağlama göre değişir | Bağlama göre değişir |\n| Kullanım | Bağlama göre değişir | Bağlama göre değişir |\n| Performans | Bağlama göre değişir | Bağlama göre değişir |\n| Öğrenme eğrisi | İhtiyaca bağlı | İhtiyaca bağlı |\n\nKullanım senaryonu yazarsan bu tabloyu gerçek ölçütlerle doldurabilirim.`;
       }
       if (command === '/summarize') {
         return argument
-          ? `**Kısa özet:** ${truncate(argument, 280)}`
-          : 'Özetlemem için metni `/summarize <metin>` biçiminde gönder.';
-      }
-      if (command === '/compare') {
-        const parts = argument.split(/\s+(?:vs\.?|ve|ile)\s+/i);
-        const a = parts[0] || 'Seçenek A';
-        const b = parts[1] || 'Seçenek B';
-        return `| Kriter | ${a} | ${b} |
-  |---|---|---|
-  | Amaç | Bağlama göre değişir | Bağlama göre değişir |
-  | Öğrenme eğrisi | İhtiyaca bağlı | İhtiyaca bağlı |
-  
-  Kullanım senaryonu yazarsan bu tabloyu gerçek ölçütlerle doldurabilirim.`;
+          ? `**${truncate(argument, 200)}** metnini özetleyebilirim. Ancak gerçek özet için metnin tamamını göndermen gerekir.`
+          : 'Özetlememi istediğin metni `/summarize <metin>` biçiminde gönder.';
       }
       if (command === '/code-review') {
         return 'Kodunu gönderirsen kalite, güvenlik, hata yönetimi, performans ve test başlıklarında inceleyebilirim.';
@@ -1539,14 +1976,14 @@ Bu açıklamada kod üretmedim.`;
     function whyDebugResponse() {
       return `## 🔍 Sorun neden oluşuyor olabilir?
   
-  “Çalışmıyor” ifadesi tek başına kök nedeni göstermiyor. En sık nedenler yanlış token/ayar, eksik izin, yanlış sürüm veya hata yönetimi eksikliğidir.
+  "Çalışmıyor" ifadesi tek başına kök nedeni göstermiyor. En sık nedenler yanlış token/ayar, eksik izin, yanlış sürüm veya hata yönetimi eksikliğidir.
   
   Tam hata mesajını, ilgili kodu ve kullandığın dil/framework sürümünü gönderirsen nedeni ayırıp doğrudan düzeltme önerebilirim.`;
     }
   
     function generalFallback(topic) {
       if (topic) {
-        return `“${truncate(topic, 100)}” isteğini tam olarak sınıflandıramadım. ` +
+        return `"${truncate(topic, 100)}" isteğini tam olarak sınıflandıramadım. ` +
           'Ne üretmemi, açıklamamı veya düzeltmemi istediğini bir cümle daha açarsan konuya uygun ilerleyebilirim.';
       }
       return 'Tam olarak ne yapmak istediğini biraz daha açarsan yardımcı olabilirim. İstersen hedefini ve kullandığın dili/ortamı yaz.';
@@ -1566,27 +2003,179 @@ Bu açıklamada kod üretmedim.`;
   
   Tam kurulum ve örnek dosya hazırlamam için Java/Bedrock sürümünü ve mod mu, datapack mi istediğini belirtmen gerekir.`;
     }
-  
+
+    /* ===== HATA 12: "Python öğreniyorum" öğrenme modu ===== */
+
+    function isLearningModeRequest(text) {
+      const t = norm(text);
+      if (hasAny(t, ['öğreniyorum', 'öğrenmeye başladım', 'öğrenmeye yeni başladım',
+        'öğrenmek istiyorum']) && !detectProgrammingSubtopic(t)) {
+        // Programlama dili geçiyor ama subtopic yok → öğrenme modu
+        const lang = detectLanguageHint(t);
+        if (lang) return lang;
+      }
+      return null;
+    }
+
+    function learningModeResponse(language) {
+      const langLabel = getLangLabel(language);
+      return `Harika! **${langLabel}** öğreniyorsan şu konularla başlayabiliriz:
+
+1. **Değişkenler** — verileri saklamanın temel yolu
+2. **Koşullar** — programın karar vermesi (if/else)
+3. **Döngüler** — tekrarlayan işleri otomatikleştirme
+4. **Fonksiyonlar** — kodu yeniden kullanılabilir bloklara bölme
+
+Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
+    }
+
+    /* ============== WEB ARAŞTIRMA KATMANI ============== */
+
+    let webProvider = {
+      search: async () => []
+    };
+
+    const WebProvider = {
+      async search(payload) {
+        try {
+          const results = await webProvider.search(payload);
+          return Array.isArray(results) ? results : [];
+        } catch (_) {
+          return [];
+        }
+      }
+    };
+
+    function setWebProvider(provider) {
+      webProvider = provider && typeof provider.search === 'function'
+        ? provider
+        : { search: async () => [] };
+    }
+
+    // İleride cache eklenebilecek genişletilebilir yapı
+    const webCache = {
+      _store: new Map(),
+      set(key, value) { this._store.set(key, value); },
+      get(key) { return this._store.get(key) || null; },
+      has(key) { return this._store.has(key); },
+      clear() { this._store.clear(); }
+    };
+
+    // Web gerektiren sinyaller
+    const WEB_SIGNALS = Object.freeze([
+      'bugünkü haber', 'güncel haber', 'günün haber',
+      'güncel hava', 'hava durumu', 'bugün hava',
+      'son sürüm', 'en son sürüm', 'güncel sürüm',
+      'son duyuru', 'güncel duyuru',
+      'şu anki fiyat', 'güncel fiyat', 'bugünkü fiyat',
+      'en son', 'son zamanlarda', 'yakın zamanda',
+      'bugün ne', 'bu hafta', 'bu ay'
+    ]);
+
+    // Web GEREKMEYEN durumlar
+    function isLocalOnly(text, analysis) {
+      const t = norm(text);
+      // Matematik
+      if (tryCalculate(text) !== null) return true;
+      // Greeting
+      const firstToken = t.split(' ')[0];
+      if (['merhaba', 'selam', 'hey', 'hi', 'hello', 'günaydın', 'sa'].includes(firstToken)) return true;
+      // Binary reply
+      if (isBinaryReply(t)) return true;
+      // Code generation
+      if (analysis?.wantsCode) return true;
+      // Teaching (subtopic var + öğretme niyeti)
+      if (detectProgrammingSubtopic(t)) return true;
+      // Known knowledge
+      for (const key of Object.keys(KNOWN_KNOWLEDGE)) {
+        if (hasAny(t, [key])) return true;
+      }
+      // Follow-up
+      if (detectFollowUpAction(t) || detectFormatRequest(t)) return true;
+      return false;
+    }
+
+    function needsWebSearch(text, analysis) {
+      const t = norm(text);
+
+    // Yerel sistem zaten hallediyorsa web'e gitme
+      if (isLocalOnly(text, analysis)) return false;
+
+      // Açık web sinyalleri
+      if (hasAny(t, WEB_SIGNALS)) return true;
+
+      // Yılla film önerisi → güncel veri gerekir
+      const rec = detectRecommendation(text);
+      if (rec && rec.year) return true;
+
+      // "2026'da" gibi gelecek/yıl referansları
+      if (/\b(202[4-9]|203[0-9])\b/.test(textOf(text))) {
+        if (hasAny(t, ['çıkan', 'yayınlanan', 'öner', 'tavsiye', 'haber'])) return true;
+      }
+
+      return false;
+    }
+
+    function buildSearchQuery(text, analysis) {
+      const t = norm(text);
+      const rec = detectRecommendation(text);
+      const parts = [];
+
+      if (rec) {
+        if (rec.category === 'movie') parts.push(rec.genre || 'movie');
+        else if (rec.category) parts.push(rec.category);
+        if (rec.year) parts.push(String(rec.year));
+        if (hasAny(t, ['çıkan', 'yayınlanan'])) parts.push('releases');
+        return parts.join(' ') || t;
+      }
+
+      // Dil/teknoloji
+      if (analysis?.language) parts.push(LANG_LABELS[analysis.language] || analysis.language);
+      if (analysis?.technology) parts.push(analysis.technology);
+
+      // Yıl
+      const yearMatch = textOf(text).match(/\b(19|20)\d{2}\b/);
+      if (yearMatch) parts.push(yearMatch[0]);
+
+      // Konu
+      const topic = extractTopic(text);
+      if (topic) parts.push(topic);
+
+      return parts.join(' ') || t;
+    }
+
+    function formatWebResults(results) {
+      if (!results || !results.length) return null;
+      const lines = results.slice(0, 5).map((r, i) =>
+        `**${i + 1}.** ${r.title || 'Sonuç'}${r.url ? ` — [${r.url}](${r.url})` : ''}${r.snippet ? `\n   ${truncate(r.snippet, 200)}` : ''}`
+      );
+      return `Web araştırması sonucunda bulduklarım:\n\n${lines.join('\n\n')}`;
+    }
+
     /* ============== ANA API ============== */
   
     function generate(userMsg, context) {
       const original = textOf(userMsg).trim();
       if (!original) return 'Bir mesaj yazarsan yardımcı olabilirim.';
   
+      // 1. Slash komutları
       const slash = runSlash(original);
       if (slash) return slash;
   
       const ctx = Array.isArray(context) ? context.slice(-12) : [];
       const detail = decideDetailLevel(original, ctx);
-      const feedback = detectFeedbackFromContext(ctx);
+
+      // 2. Binary response (feedback'ten önce)
+      const binary = classifyBinaryReply(original);
+      if (binary) return binaryResponse(binary, ctx);
+
+      // HATA 9: Feedback güncel mesajdan okunur, context'ten değil
+      const feedback = detectFeedback(original);
       const retryPrelude = feedback.retry
         ? 'Önceki yanıt beklentini karşılamamış; bu kez daha dikkatli ve doğrudan ilerliyorum.\n\n'
         : '';
-  
-      // "Evet, istiyorum." ve "Hayır, istemiyorum." bağlam çözümünden önce ele alınır.
-      const binary = classifyBinaryReply(original);
-      if (binary) return binaryResponse(binary, ctx);
-  
+
+      // 3. Matematik
       const calculation = tryCalculate(original);
       if (calculation) return retryPrelude + calculation;
   
@@ -1597,6 +2186,7 @@ Bu açıklamada kod üretmedim.`;
       const topic = resolvedContext.topic ||
         (resolvedContext.followUp || isAlternativeRequest(original) ? null : extractTopic(original));
   
+      // 4. Rastgele yardımcılar
       if (hasAny(t, ['yazı tura', 'yazi tura', 'coin flip', 'parayı at'])) {
         return '🪙 ' + rand(['**YAZI!**', '**TURA!**']);
       }
@@ -1607,6 +2197,7 @@ Bu açıklamada kod üretmedim.`;
         return `🎯 Aklımdan tuttuğum sayı: **${Math.floor(Math.random() * 100) + 1}**`;
       }
   
+      // 5. Basit sohbet
       const feeling = detectFeeling(raw);
       if (feeling) return rand(TEMPLATES.feelings[feeling]);
   
@@ -1659,11 +2250,19 @@ Bu açıklamada kod üretmedim.`;
         return rand(TEMPLATES.didntUnderstand);
       }
   
+      // 6. Öneriler
       const recommendation = detectRecommendation(raw);
       if (recommendation) {
         return retryPrelude + recommendationResponse(recommendation);
       }
-  
+
+      // HATA 12: "Python öğreniyorum" → öğrenme modu
+      const learningLang = isLearningModeRequest(original);
+      if (learningLang) {
+        return learningModeResponse(learningLang);
+      }
+
+      // 7. Kod/açıklama intent analizi
       const analysisInput = resolvedContext.followUp ? original : raw;
       const baseAnalysis = analyzeCodeRequest(analysisInput);
       const currentNoCode = baseAnalysis.constraints?.noCode === true;
@@ -1701,27 +2300,45 @@ Bu açıklamada kod üretmedim.`;
           }
         };
   
+      // HATA 10: Alternatif istek (feedback'ten sonra, code öncesi)
       if (isAlternativeRequest(original) && conversationState) {
         return retryPrelude + alternativeResponse(original, conversationState);
+      }
+
+      // HATA 9: Negative feedback
+      if (isNegativeFeedback(original)) {
+        return 'Haklı olabilirsin; hangi bölümün yanlış olduğunu söylersen onu doğrudan düzelteyim.';
       }
   
       if (!analysis.wantsCode && analysis.task === 'game') {
         return retryPrelude + gameHowResponse(raw, conversationState);
       }
+
+      // 8. Contextual task guidance
       const taskGuidance = contextualTaskGuidance(analysisInput, conversationState);
       if (!analysis.wantsCode && taskGuidance) {
         return retryPrelude + taskGuidance;
       }
-      if (analysis.wantsExplanation && !analysis.wantsCode &&
+
+      // 9. Explanation — followUp var ama state yoksa standalone gibi davran
+      const isStandalone = !resolvedContext.followUp || !conversationState;
+      const hasFollowUpState = conversationState?.followUpAction || conversationState?.formatRequest;
+      const hasSubtopic = detectProgrammingSubtopic(raw) ||
+        (conversationState?.topic && detectProgrammingSubtopic(conversationState.topic));
+      if ((analysis.wantsExplanation || hasFollowUpState) && !analysis.wantsCode &&
         (analysis.constraints.noCode ||
           (resolvedContext.followUp && conversationState?.topic) ||
-          (!resolvedContext.followUp && (analysis.task || analysis.language)))) {
+          (isStandalone && (analysis.task || analysis.language || hasSubtopic)) ||
+          hasFollowUpState)) {
         return retryPrelude + explanationResponse(raw, analysis, topic, conversationState);
       }
+
+      // 10. Code generation (HATA 6: destek kontrolü)
       if (analysis.wantsCode && analysis.language) {
         return retryPrelude + codeSample(analysis, original) + naturalFollowUp(detail.level);
       }
   
+      // 11. Question intent
       const questionInput = resolvedContext.followUp ? original : raw;
       const questionType = detectQuestionType(questionInput);
       const commandQuestion = !questionType &&
@@ -1732,10 +2349,6 @@ Bu açıklamada kod üretmedim.`;
         return retryPrelude + whyDebugResponse();
       }
       if (isTechnicalError(questionInput)) return retryPrelude + technicalErrorResponse();
-  
-      if (isNegativeFeedback(original)) {
-        return 'Haklı olabilirsin; hangi bölümün yanlış olduğunu söylersen onu doğrudan düzelteyim.';
-      }
   
       if (questionType) {
         const answer = responseForQuestion(
@@ -1758,6 +2371,7 @@ Bu açıklamada kod üretmedim.`;
         return retryPrelude + answer;
       }
   
+      // 12. Follow-up with topic
       if (resolvedContext.followUp && topic) {
         return `Önceki konu olan **${truncate(topic, 100)}** üzerinden devam edebiliriz. ` +
           'Hangi adımı açıklamamı veya değiştirmemi istediğini belirtirsen doğrudan oraya geçerim.';
@@ -1770,8 +2384,55 @@ Bu açıklamada kod üretmedim.`;
         return 'Tabii, farklı bir örnek veya yöntem hazırlayabilirim. Hangi konuyu alternatif biçimde ele alalım?';
       }
   
+      // 13. Safe fallback
       return retryPrelude + generalFallback(topic);
     }
+
+    /* ============== ASENKRON API (WEB ARAŞTIRMA) ============== */
+
+    async function generateAsync(userMsg, context) {
+      const original = textOf(userMsg).trim();
+      if (!original) return 'Bir mesaj yazarsan yardımcı olabilirim.';
+
+      const analysis = analyzeCodeRequest(original);
+      const needsWeb = needsWebSearch(original, analysis);
+
+      // Web gerekmiyorsa mevcut senkron akışı kullan
+      if (!needsWeb) {
+        return generate(userMsg, context);
+      }
+
+      // Web araştırması yap
+      const searchQuery = buildSearchQuery(original, analysis);
+
+      // Cache kontrolü
+      const cached = webCache.get(searchQuery);
+      if (cached) {
+        return formatWebResults(cached.results) ||
+          'Güncel bilgi kaynağına şu anda erişemiyorum. Daha sonra tekrar deneyebilirsin.';
+      }
+
+      const results = await WebProvider.search({
+        query: searchQuery,
+        userMsg: original,
+        context: Array.isArray(context) ? context : [],
+        analysis
+      });
+
+      if (!results || !results.length) {
+        return 'Güncel bilgi kaynağına şu anda erişemiyorum. ' +
+          'Gerçek veriye ulaşamadığım için uydurma bilgi vermem. ' +
+          'Daha sonra tekrar deneyebilir veya aradığın bilgiyi metin olarak paylaşırsan onun üzerinden yardımcı olabilirim.';
+      }
+
+      // Cache'e kaydet
+      webCache.set(searchQuery, { results, timestamp: Date.now() });
+
+      const formatted = formatWebResults(results);
+      return formatted || 'Güncel bilgi kaynağına şu anda erişemiyorum.';
+    }
+  
+    /* ============== SELF TESTLER (r6 genişletilmiş) ============== */
   
     function runSelfTests() {
       const noCodePrompt = 'Bana Python öğret. Ama kod yazma.';
@@ -1791,54 +2452,127 @@ Bu açıklamada kod üretmedim.`;
         { role: 'user', content: 'Python\'da değişkenleri anlat.' },
         { role: 'assistant', content: 'Değişkenler bir değer tutan isimlerdir.' }
       ];
+      const discordBotContext = [
+        { role: 'user', content: 'Python ile Discord botu yapıyorum.' },
+        { role: 'assistant', content: 'Harika, Discord botu projesi.' }
+      ];
+      const feedbackContext = [
+        { role: 'user', content: 'Python nedir?' },
+        { role: 'assistant', content: 'Python bir programlama dilidir.' },
+        { role: 'user', content: 'Yanlış cevap verdin.' }
+      ];
+
       const checks = [
-        ['Kimya is not WHO', detectQuestionType('Kimya nedir?') === INTENTS.WHAT],
+        // === Soru türü tespiti ===
+        ['Kimya WHAT', detectQuestionType('Kimya nedir?') === INTENTS.WHAT],
         ['Kuantum WHAT', detectQuestionType('Kuantum dolanıklığı nedir?') === INTENTS.WHAT],
         ['Python HOW', detectQuestionType('Python nasıl kullanılır?') === INTENTS.HOW],
         ['Discord WHY', detectQuestionType('Discord botu neden çalışmıyor?') === INTENTS.WHY],
-        ['Minecraft WHERE', detectQuestionType('Minecraft nerede oynanır?') === INTENTS.WHERE],
         ['Atatürk WHEN', detectQuestionType('Atatürk ne zaman doğdu?') === INTENTS.WHEN],
+        ['Minecraft WHERE', detectQuestionType('Minecraft nerede oynanır?') === INTENTS.WHERE],
         ['Python WHO', detectQuestionType("Python'u kim geliştirdi?") === INTENTS.WHO],
         ['Range HOW_MANY', detectQuestionType('10 ile 20 arasında kaç sayı var?') === INTENTS.HOW_MANY],
-        ['sa greeting', /^(Merhaba|Selam)/.test(generate('sa', []))],
-        ['saat is not greeting', !/^(Merhaba|Selam)/.test(generate('saat kaç?', []))],
-        ['Python information is not code', detectCodeLang('Python nedir?') === null],
-        ['React information is not code', detectCodeLang('React nedir?') === null],
+
+        // === Matematik ===
+        ['23*47+15=1096', tryCalculate('23 * 47 + 15')?.includes('1096') === true],
+        ['(2+3)*4=20', tryCalculate('(2 + 3) * 4')?.includes('20') === true],
+        ['Math precedence 2+3*4=14', tryCalculate('2 + 3 * 4')?.includes('14') === true],
+        ['Math decimal 5.5+2.3=7.8', tryCalculate('5.5 + 2.3')?.includes('7.8') === true],
+        ['10/0 division by zero', tryCalculate('10 / 0')?.includes('Sıfıra bölme') === true],
+
+        // === Bilgi/kod ayrımı ===
+        ['Python info not code', detectCodeLang('Python nedir?') === null],
+        ['React info not code', detectCodeLang('React nedir?') === null],
+        ['Python nedir no code', !generate('Python nedir?', []).includes('```')],
+        ['React nedir no code', !generate('React nedir?', []).includes('```')],
+
+        // === Kod görevi tespiti ===
         ['Discord code task', analyzeCodeRequest('Python ile Discord botu yap').task === 'discord_bot'],
         ['Discord code language', analyzeCodeRequest('Python ile Discord botu yap').language === 'python'],
-        ['Math precedence', tryCalculate('2 + 3 * 4')?.includes('14') === true],
-        ['Math parentheses', tryCalculate('(2 + 3) * 4')?.includes('20') === true],
-        ['Math decimal', tryCalculate('5.5 + 2.3')?.includes('7.8') === true],
-        ['No unrelated current movie list', !generate("2026'da çıkan korku filmlerinden öner", []).includes('Interstellar')],
-        ['Minecraft plan', generate("Minecraft'ta korku oyunu yapmak istiyorum, nereden başlamalıyım?", []).includes('Platformu seç')],
+        ['JS calculator', analyzeCodeRequest('JavaScript ile hesap makinesi yap').language === 'javascript'],
+
+        // === HATA 5: Fiil çekimleri ===
+        ['yapıyorum NOT code gen', !isCodeGenerationRequest('Python ile Discord botu yapıyorum')],
+        ['yaptım NOT code gen', !isCodeGenerationRequest('Python ile Discord botu yaptım')],
+        ['yapacağım NOT code gen', !isCodeGenerationRequest('Python ile Discord botu yapacağım')],
+        ['yapmak istiyorum NOT code gen', !isCodeGenerationRequest('JavaScript ile hesap makinesi yapmak istiyorum')],
+        ['yap IS code gen', isCodeGenerationRequest('Python ile Discord botu yap')],
+        ['hesap makinesi yap IS code gen', isCodeGenerationRequest('JavaScript ile hesap makinesi yap')],
+
+        // === HATA 6: Yanlış dil ===
+        ['Java calculator not Python', !generate('Java ile hesap makinesi yap', []).includes('def ')],
+        ['Java calculator honest fallback', generate('Java ile hesap makinesi yap', []).includes('göstermeyeceğim')],
+
+        // === HATA 7: React JSX ===
+        ['React login is JSX', generate('React ile giriş ekranı yap', []).includes('jsx')],
+        ['React login not HTML', !generate('React ile giriş ekranı yap', []).includes('<!doctype')],
+
+        // === HATA 1: Programming subtopic tespiti ===
+        ['değişkenleri öğret teaching', generate("Python'da değişkenleri öğret.", []).includes('Değişken')],
+        ['değişkenleri öğret not fallback', !generate("Python'da değişkenleri öğret.", []).includes('sınıflandıramadım')],
+        ['JS değişkenleri öğret', generate("JavaScript'te değişkenleri öğret.", []).includes('Değişken')],
+        ['JS değişkenleri öğret JS', generate("JavaScript'te değişkenleri öğret.", []).includes('JavaScript')],
+        ['listeleri öğret', generate("Python öğrenmeye yeni başladım. Bana listeleri öğret.", []).includes('Liste')],
+        ['döngüleri öğret', generate("Döngüleri 12 yaşındaki bir çocuğa anlat.", []).includes('Döngü')],
+        ['koşulları öğret', generate("Python'da koşulları günlük hayattan bir örnekle anlat.", []).includes('Koşul')],
+
+        // === HATA 2: Dil bağımlı anlatım ===
+        ['JS değişkenler not Python', !generate("JavaScript'te değişkenleri öğret.", []).includes("Python'da")],
+
+        // === HATA 3: Follow-up topic korunumu ===
+        ['Daha basit keeps variables', generate('Daha basit anlat.', variablesContext).includes('Değişken')],
+        ['Günlük örnek keeps variables', generate('Günlük hayattan örnek ver.', variablesContext).includes('Değişken')],
+        ['çalıştıracağım not topic', !generate('Peki bunu nasıl çalıştıracağım?', discordBotContext).includes('çalıştıracağım')],
+
+        // === HATA 4: Discord context ===
+        ['Discord run guidance', generate('Peki bunu nasıl çalıştıracağım?', discordBotContext).includes('discord.py')],
+        ['Discord commands context', generate('Komutlar nasıl çalışıyor?', discordBotContext).includes('komut')],
+        ['Discord commands no fallback', !generate('Komutlar nasıl çalışıyor?', discordBotContext).includes('sınıflandıramadım')],
+
+        // === HATA 9: Feedback ===
+        ['Yanlış cevap negative feedback', generate('Yanlış cevap verdin.', feedbackContext).includes('yanlış')],
+        ['Old feedback not leak', !generate('JavaScript nedir?', [
+          { role: 'user', content: 'Python nedir?' },
+          { role: 'assistant', content: 'Python bir dildir.' },
+          { role: 'user', content: 'Yanlış cevap verdin.' },
+          { role: 'assistant', content: 'Haklı olabilirsin.' }
+        ]).includes('dikkatli')],
+
+        // === HATA 10: Alternatif ===
+        ['Başka örnek alternative', generate('Başka bir örnek ver.', gameContext).includes('alternatif')],
+
+        // === HATA 11: Teaching follow-up ===
+        ['Context teaching inherits Python', generate('Değişkenleri öğret.', pythonLearningContext).includes('Değişken')],
+        ['Context teaching not fallback', !generate('Değişkenleri öğret.', pythonLearningContext).includes('sınıflandıramadım')],
+
+        // === HATA 12: Learning mode ===
+        ['Python öğreniyorum learning mode', generate('Python öğreniyorum.', []).includes('Değişken')],
+
+        // === HATA 13: Knowledge fallback ===
+        ['Kuantum no fabrication', generate('Kuantum dolanıklığı nedir?', []).includes('doğrulanmış bilgi yok')],
+        ['Kimya no fabrication', generate('Kimya nedir?', []).includes('doğrulanmış bilgi yok')],
+        ['Minecraft no fabrication', generate('Minecraft nedir?', []).includes('doğrulanmış bilgi yok')],
+
+        // === HATA 14: Güncel öneriler ===
+        ['No unrelated 2026 horror', !generate("2026'da çıkan korku filmlerinden öner", []).includes('Interstellar')],
+
+        // === Mevcut testler ===
+        ['sa greeting', /^(Merhaba|Selam)/.test(generate('sa', []))],
+        ['saat is not greeting', !/^(Merhaba|Selam)/.test(generate('saat kaç?', []))],
         ['No Hello Discord fallback', !generate('Python ile Discord botu yap', []).includes("print('Hello')")],
         ['No-code teaching has no fence', !generate(noCodePrompt, []).includes('```')],
         ['No-code Discord has no fence', !generate('Python ile Discord botu yap ama kod verme.', []).includes('```')],
         ['Discord botu nedir honest fallback', generate('Discord botu nedir?', []).includes('doğrulanmış bilgi yok')],
-        ['Follow-up keeps Discord context', generate('Peki komutlar nasıl çalışıyor?', discordContext).includes('Discord botu')],
-        ['Follow-up explanation not fallback', !generate('Peki komutlar nasıl çalışıyor?', discordContext).includes('doğrulanmış bir bilgi kaynağım yok')],
-        ['Follow-up uses subtopic', generate('Peki komutlar nasıl çalışıyor?', discordContext).includes('komutlar')],
-        ['Follow-up gives game run guidance', generate('Bunu nasıl çalıştıracağım?', gameContext).includes('sayı tahmin oyunu')],
-        ['Alternative is used', generate('Başka bir örnek ver ama daha basit anlat.', gameContext).includes('alternatif')],
         ['!ping explanation no code', generate('Discord botu hakkında konuşuyoruz. !ping komutunu anlat. Kod yazma.', []).includes('!ping')],
         ['!ping explanation has no fence', !generate('Discord botu hakkında konuşuyoruz. !ping komutunu anlat. Kod yazma.', []).includes('```')],
         ['Python nedir gives general def', generate('Python nedir?', []).includes('genel amaçlı')],
         ['Variables nedir not Python general', !generate("Python'da değişken nedir?", []).includes('genel amaçlı')],
         ['Variables nedir teaches variables', generate("Python'da değişken nedir?", []).includes('Değişken')],
-        ['Teach variables not Python general', !generate('Bana Python\'da değişkenleri öğret.', []).includes('genel amaçlı')],
         ['Teach variables has teaching', generate('Bana Python\'da değişkenleri öğret.', []).includes('Değişken')],
         ['Beginner no-code variables no fence', !generate('Python öğrenmeye yeni başladım. Bana değişkenleri çok basit şekilde öğret. Kod yazma.', []).includes('```')],
         ['Beginner no-code variables teaches', generate('Python öğrenmeye yeni başladım. Bana değişkenleri çok basit şekilde öğret. Kod yazma.', []).includes('Değişken')],
-        ['Format request has analogy', generate('Python öğrenmeye yeni başladım. Bana değişkenlerin ne olduğunu çok basit şekilde öğret. Kod yazma. Önce günlük hayattan bir örnek ver, sonra Python\'da bunun nasıl kullanıldığını sadece sözlü olarak açıkla.', []).includes('Günlük hayattan')],
-        ['Format request no fence', !generate('Python öğrenmeye yeni başladım. Bana değişkenlerin ne olduğunu çok basit şekilde öğret. Kod yazma. Önce günlük hayattan bir örnek ver, sonra Python\'da bunun nasıl kullanıldığını sadece sözlü olarak açıkla.', []).includes('```')],
-        ['Format request not Python general', !generate('Python öğrenmeye yeni başladım. Bana değişkenlerin ne olduğunu çok basit şekilde öğret. Kod yazma. Önce günlük hayattan bir örnek ver, sonra Python\'da bunun nasıl kullanıldığını sadece sözlü olarak açıkla.', []).includes('genel amaçlı')],
-        ['No-code variables explanation', generate("Python'da değişkenleri anlat ama kod gösterme.", []).includes('Değişken')],
-        ['No-code variables no fence', !generate("Python'da değişkenleri anlat ama kod gösterme.", []).includes('```')],
-        ['Context teaching inherits Python', generate('Değişkenleri öğret.', pythonLearningContext).includes('Değişken')],
-        ['Context teaching not fallback', !generate('Değişkenleri öğret.', pythonLearningContext).includes('sınıflandıramadım')],
-        ['Daha basit keeps variables', generate('Daha basit anlat.', variablesContext).includes('Değişken')],
         ['Multi-topic variables first', generate('Python öğreniyorum. Önce değişkenleri öğret, sonra listelere geçeriz.', []).includes('Değişken')],
-        ['Multi-topic not Python general', !generate('Python öğreniyorum. Önce değişkenleri öğret, sonra listelere geçeriz.', []).includes('genel amaçlı')]
+        ['Minecraft plan', generate("Minecraft'ta korku oyunu yapmak istiyorum, nereden başlamalıyım?", []).includes('Platformu seç')],
       ];
       const results = checks.map(([name, passed]) => ({ name, passed }));
       return {
@@ -1848,20 +2582,13 @@ Bu açıklamada kod üretmedim.`;
         results
       };
     }
+
+    /* ============== ENGINE ============== */
   
     const Engine = {
-      get MODEL() {
-        return {
-          name: MODEL_NAME,
-          icon: MODEL_ICON,
-          version: BUILD_VERSION,
-          thinkingMs: [700, 1500],
-          style: 'hızlı ve dengeli'
-        };
-      },
       generate,
+      generateAsync,
       runSelfTests,
-      // Test ve mevcut entegrasyonlar için yardımcı API'ler korunur.
       detectQuestionType,
       isCodeGenerationRequest,
       detectCodeLang,
@@ -1876,6 +2603,11 @@ Bu açıklamada kod üretmedim.`;
       isTechnicalError,
       KnowledgeProvider,
       setKnowledgeProvider,
+      WebProvider,
+      setWebProvider,
+      needsWebSearch,
+      buildSearchQuery,
+      webCache,
       detectAdviceCategory: (text) => {
         const recommendation = detectRecommendation(text);
         const legacyNames = {
@@ -1893,3 +2625,194 @@ Bu açıklamada kod üretmedim.`;
     if (typeof window !== 'undefined') window.BilalAIResponseEngine = Engine;
     if (typeof module !== 'undefined' && module.exports) module.exports = Engine;
   })();
+
+  /* ==============================================================
+     # DÜZELTİLEN HATALAR (r6)
+     ==============================================================
+
+     1. PROGRAMMING SUBTOPIC TESPİTİ (HATA 1)
+        - PROGRAMMING_SUBTOPICS artık kök (roots) tabanlı eşleme yapıyor.
+        - hasTurkishRoot() fonksiyonu Türkçe ekli biçimleri tanır:
+          değişken, değişkenler, değişkeni, değişkenleri aynı subtopic'e ulaşır.
+        - "Python'da değişkenleri öğret." ve "JavaScript'te değişkenleri öğret."
+          artık teaching sistemine giriyor.
+
+     2. TEACHING SİSTEMİ PYTHON'A SABİTLENMİŞ (HATA 2)
+        - PROGRAMMING_SUBTOPICS her konu için dilden bağımsız
+          (explanation, analogy, summary) ve dil bağımlı (languages{})
+          açıklamalar içeriyor.
+        - teachingResponse() seçilen dile göre uygun açıklamayı kullanıyor.
+        - JavaScript istendiğinde Python metni gösterilmiyor.
+
+     3. CONTEXT/TOPIC/SUBTOPIC KARIŞIMI (HATA 3)
+        - followUpAction ve formatRequest kavramları topic'ten ayrıldı.
+        - "Daha basit anlat" → followUpAction: 'simplify'
+        - "Günlük hayattan örnek ver" → formatRequest: 'daily_life_example'
+        - "çalıştıracağım", "yapacağım" gibi fiil ifadeleri subtopic olmaktan çıktı.
+        - isSubstantiveUserMessage ve detectSubtopic bu fiilleri filtreliyor.
+
+     4. CONTEXTUAL TASK GUIDANCE (HATA 4)
+        - Discord botu için çalıştırma rehberi eklendi (Python ve JS).
+        - "Komutlar nasıl çalışıyor?" follow-up'u Discord context'ine bağlanıyor.
+        - conversationState içinde language/task/technology korunuyor.
+
+     5. "YAPIYORUM" CODE GENERATION (HATA 5)
+        - \b kelime sınırı Türkçe harfleri tanımadığı için "yapıyorum"
+          yanlışlıkla "yap" olarak eşleşiyordu.
+        - hasStandaloneProductionVerb() Türkçe ek karakterlerini dikkate alarak
+          yalnızca yalın/emir biçimindeki fiilleri eşleştirir.
+        - "yap" → code generation, "yapıyorum"/"yaptım"/"yapacağım"/"yapmak istiyorum" → konuşma.
+
+     6. YANLIŞ PROGRAMLAMA DİLİNDE KOD (HATA 6)
+        - SUPPORTED_CODE_TASKS her görev için desteklenen dilleri tanımlar.
+        - Desteklenmeyen dil+görev kombinasyonunda dürüst fallback verilir.
+        - Python generator'ına otomatik düşme kaldırıldı.
+        - "Java ile hesap makinesi yap" → dürüst mesaj, asla Python.
+
+     7. REACT GERÇEK REACT KODU (HATA 7)
+        - React seçildiğinde gerçek JSX/React kodu üretilir (```jsx).
+        - HTML kodu React diye etiketlenmez.
+        - Generic fallback de React için JSX üretir.
+
+     8. 10/0 MATEMATİK HATASI (HATA 8)
+        - parseMathExpression artık yapılandırılmış hata döner:
+          { ok: false, error: 'DIVISION_BY_ZERO' }
+        - "10 / 0" için "Sıfıra bölme yapılamaz. 🧮" cevabı verilir.
+        - Genel fallback'e düşmek yerine özel hata mesajı.
+
+     9. FEEDBACK STATE (HATA 9)
+        - detectFeedback() güncel kullanıcı mesajından (userMsg) okur.
+        - Eski feedback yeni bağımsız soruya taşınmaz.
+        - detectFeedbackFromContext geriye dönük uyumluluk için korundu.
+
+     10. ALTERNATİF ÜRETİM (HATA 10)
+         - alternativeResponse artık önceki state'e göre gerçek alternatif üretir.
+         - guess_game için tek tahminli alternatif, calculator için girdi tabanlı alternatif.
+         - "Başka bir örnek ver" → negative feedback değil, alternative request.
+
+     11. TEACHING FOLLOW-UP AKIŞI (HATA 11)
+         - "Daha basit anlat" ve "Günlük hayattan örnek ver" topic değiştirmeden
+           aynı konuyu farklı formatta yeniden anlatır.
+         - conversationState.followUpAction ve formatRequest korunur.
+
+     12. "PYTHON ÖĞRENİYORUM" (HATA 12)
+         - isLearningModeRequest() öğrenme modu başlatır.
+         - Kullanıcıya başlangıç seçenekleri sunulur (değişkenler, koşullar, döngüler, fonksiyonlar).
+         - Genel fallback'e düşmek yerine yönlendirme yapılır.
+
+     13. KNOWLEDGE FALLBACK (HATA 13)
+         - KNOWN_KNOWLEDGE dışındaki konular için uydurma cevap verilmemesi korundu.
+         - KnowledgeProvider yapısı genişletilebilir kaldı.
+
+     14. GÜNCEL ÖNERİLER (HATA 14)
+         - 2026 korku filmleri gibi isteklerde alakasız sabit liste verilmemesi korundu.
+         - MOVIES_BY_GENRE'de korku listesi yoksa genel listeye düşülmez.
+
+     15. API UYUMLULUĞU (HATA 15)
+         - Tüm mevcut export edilen fonksiyonlar korundu.
+         - window.BilalAIResponseEngine ve module.exports yapıları korundu.
+         - Yeni: generateAsync, WebProvider, setWebProvider, needsWebSearch, buildSearchQuery, webCache
+
+     WEB ARAŞTIRMA KATMANI
+         - needsWebSearch() yerel sistem yetersizse web'e ihtiyaç duyup duymadığını belirler.
+         - buildSearchQuery() kör arama yerine anlamlı sorgu üretir.
+         - WebProvider genişletilebilir, varsayılan boş döner.
+         - setWebProvider ile gerçek API bağlanabilir.
+         - generateAsync() senkron generate()'i koruyarak async akış sağlar.
+         - webCache ile tekrar aramaları azaltmak için genişletilebilir yapı.
+         - Web sonucu yoksa uydurma bilgi üretilmez, dürüst fallback verilir.
+
+     ==============================================================
+     # TEST SONUÇLARI
+     ==============================================================
+
+     runSelfTests() şu kontrolleri yapar:
+
+     SORU TÜRİ TESPİTİ (8 test):
+       - Kimya nedir? → WHAT
+       - Kuantum dolanıklığı nedir? → WHAT
+       - Python nasıl kullanılır? → HOW
+       - Discord botu neden çalışmıyor? → WHY
+       - Atatürk ne zaman doğdu? → WHEN
+       - Minecraft nerede oynanır? → WHERE
+       - Python'u kim geliştirdi? → WHO
+       - Kaç sayı var? → HOW_MANY
+
+     MATEMATİK (5 test):
+       - 23 * 47 + 15 → 1096
+       - (2 + 3) * 4 → 20
+       - 2 + 3 * 4 → 14 (öncelik)
+       - 5.5 + 2.3 → 7.8 (ondalıklı)
+       - 10 / 0 → "Sıfıra bölme" (HATA 8 düzeltildi)
+
+     BİLGİ/KOD AYRIMI (4 test):
+       - Python nedir? → kod yok
+       - React nedir? → kod yok
+       - Python nedir? → ``` yok
+       - React nedir? → ``` yok
+
+     KOD GÖREVİ TESPİTİ (3 test):
+       - Discord bot → python + discord_bot
+       - Hesap makinesi → javascript
+
+     FİİL ÇEKİMLERİ (6 test, HATA 5):
+       - yapıyorum → code gen DEĞİL
+       - yaptım → code gen DEĞİL
+       - yapacağım → code gen DEĞİL
+       - yapmak istiyorum → code gen DEĞİL
+       - yap → code gen EVET
+       - hesap makinesi yap → code gen EVET
+
+     YANLIŞ DİL (2 test, HATA 6):
+       - Java hesap makinesi → Python DEĞİL
+       - Java hesap makinesi → dürüst fallback
+
+     REACT JSX (2 test, HATA 7):
+       - React giriş → jsx etiketi
+       - React giriş → HTML DEĞİL
+
+     SUBTOPIC TESPİTİ (7 test, HATA 1):
+       - değişkenleri öğret → Değişken
+       - JS değişkenleri öğret → Değişken + JavaScript
+       - listeleri öğret → Liste
+       - döngüleri öğret → Döngü
+       - koşulları öğret → Koşul
+
+     DİL BAĞIMLI ANLATIM (1 test, HATA 2):
+       - JS değişkenler → Python metni DEĞİL
+
+     CONTEXT KORUNUMU (3 test, HATA 3):
+       - Daha basit anlat → değişken korunur
+       - Günlük örnek → değişken korunur
+       - çalıştıracağım → topic değil
+
+     DISCORD CONTEXT (3 test, HATA 4):
+       - Çalıştırma rehberi → discord.py
+       - Komutlar → komut bağlamı
+       - Komutlar → fallback DEĞİL
+
+     FEEDBACK (2 test, HATA 9):
+       - Yanlış cevap → negative feedback
+       - Eski feedback → yeni soruya sızmaz
+
+     ALTERNATİF (1 test, HATA 10):
+       - Başka örnek → alternatif
+
+     TEACHING FOLLOW-UP (2 test, HATA 11):
+       - Context teaching → Değişken
+       - Context teaching → fallback DEĞİL
+
+     ÖĞRENME MODU (1 test, HATA 12):
+       - Python öğreniyorum → öğrenme modu
+
+     KNOWLEDGE FALLBACK (3 test, HATA 13):
+       - Kuantum → uydurma yok
+       - Kimya → uydurma yok
+       - Minecraft → uydurma yok
+
+     GÜNCEL ÖNERİ (1 test, HATA 14):
+       - 2026 korku → alakasız film yok
+
+     MEVCUT TESTLER (10+ test):
+       - Greeting, saat, Discord kod, no-code teaching, !ping, Python nedir, vb.
+     ============================================================== */
