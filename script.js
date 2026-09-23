@@ -37,15 +37,15 @@
       style: 'ultra hızlı, kısa cevaplar',
       engine: 'BilalAIFlashLite'
     },
-    flash: {
-      name: 'BilalAI - Flash 1.1',
-      shortName: 'Flash',
-      icon: '⚡',
-      color: '#00BFFF',
-      thinkingMs: [700, 1500],
-      style: 'hızlı ve dengeli',
-      engine: 'BilalAIResponseEngine'
-    }
+flash: {
+  name: 'BilalAI - Flash 1.2',
+  shortName: 'Flash 1.2',
+  icon: '⚡',
+  color: '#00BFFF',
+  thinkingMs: [700, 1500],
+  style: 'hızlı ve dengeli',
+  engine: 'BilalAIResponseEngine'
+}
   };
 
   /* ========== Beceri Haritası (JSON'dan alınan + temel) ========== */
