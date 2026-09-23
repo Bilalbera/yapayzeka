@@ -922,7 +922,7 @@ flash: {
     // Fallback: motor yoksa basit yanıt
     const m = meta;
     return [
-      `${m.icon || '⚡'} Anladım! **"${truncate(userMsg, 90)}"** hakkında konuşuyoruz.\n\n`,
+       ${m.icon || '⚡'} Anladım!` **"${truncate(userMsg, 90)}"** hakkında konuşuyoruz.\n\n`,
       `Konuyu daha derin inceleyebilmem için birkaç detay paylaşabilir misin?\n`,
       `- Ne **tür** bir sonuç beklüyorsun?\n`,
       `- Hangi **ortam / teknoloji** ile çalışıyoruz?\n`,
