@@ -1926,22 +1926,22 @@ discord.py kur: Terminalde \`pip install -U discord.py\` çalıştır.
 
 Bot dosyasını kaydet: Kodu \`bot.py\` gibi bir dosyaya kaydet.
 
-DISCORD_TOKEN ayarla: Ortam değişkeni olarak `export DISCORD_TOKEN=token_metnin` (Windows: `set DISCORD_TOKEN=...`).
+DISCORD_TOKEN ayarla: Ortam değişkeni olarak \`export DISCORD_TOKEN=token_metnin\` (Windows: \`set DISCORD_TOKEN=...\`).
 
-Çalıştır: Terminalde `python bot.py` (bazı sistemlerde `python3 bot.py`).
+Çalıştır: Terminalde ```python bot.py``` (bazı sistemlerde `python3 bot.py`).
 
 Çevrimiçi kontrol et: Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.`;
    }
    if (lang === 'javascript') {
      return `## JavaScript Discord botunu çalıştırma adımları
 
-discord.js kur: Terminalde `npm install discord.js` çalıştır.
+discord.js kur: Terminalde ```npm install discord.js``` çalıştır.
 
-Bot dosyasını kaydet: Kodu `bot.js` gibi bir dosyaya kaydet.
+Bot dosyasını kaydet: Kodu ```bot.js``` gibi bir dosyaya kaydet.
 
 DISCORD_TOKEN ayarla: Ortam değişkeni olarak `export DISCORD_TOKEN=token_metnin` (Windows: `set DISCORD_TOKEN=...`).
 
-Çalıştır: Terminalde `node bot.js`.
+Çalıştır: Terminalde ```node bot.js```.
 
 Çevrimiçi kontrol et: Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.`;
 }
@@ -1952,11 +1952,11 @@ if (state.task === 'guess_game' &&
 hasAny(text, ['nasıl', 'çalıştır', 'çalıştıracağım'])) {
 return `Python'daki sayı tahmin oyunu için çalıştırma adımları:
 
-Kodu `tahmin.py` gibi bir dosyaya kaydet.
+Kodu ```tahmin.py``` gibi bir dosyaya kaydet.
 
 Terminali dosyanın bulunduğu klasörde aç.
 
-`python tahmin.py` komutunu çalıştır. Bazı sistemlerde `python3 tahmin.py` olabilir.
+```python tahmin.py``` komutunu çalıştır. Bazı sistemlerde `python3 tahmin.py` olabilir.
 
 Programın istediği tahmini yazıp Enter'a bas.`;
 }
