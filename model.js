@@ -1305,8 +1305,8 @@ if err != nil {
     return
 }
 fmt.Println(string(body))
-
-});
+}
+`);
         }
         if (language === 'python') {
           return codeFence('python', `import requests
@@ -1332,8 +1332,8 @@ return unsupportedLanguageResponse('http_request', language);
   # Bu fonksiyona görevin ana adımlarını ekleyebilirsin.
   print("İş akışı başlatıldı.")
 
-if name == "main":
-main());
+if __name__ == "__main__":
+  main()`);
       }
       if (language === 'htmlcss') {
         return codeFence('html', `<!doctype html>
@@ -1360,7 +1360,8 @@ return (
 );
 }
 
-export default ${capitalize(safeTopic.replace(/[^a-zA-Zçğıöşü0-9]/g, '')) || 'Bilesen'};);
+export default ${capitalize(safeTopic.replace(/[^a-zA-Zçğıöşü0-9]/g, '')) || 'Bilesen'};
+`);
       }
       // HATA: Java için generic Java iskeleti — asla JavaScript'e düşme
       if (language === 'java') {
@@ -1923,7 +1924,7 @@ Bu açıklamada kod üretmedim.`;
 
 discord.py kur: Terminalde \`pip install -U discord.py\` çalıştır.
 
-Bot dosyasını kaydet: Kodu `bot.py` gibi bir dosyaya kaydet.
+Bot dosyasını kaydet: Kodu \`bot.py\` gibi bir dosyaya kaydet.
 
 DISCORD_TOKEN ayarla: Ortam değişkeni olarak `export DISCORD_TOKEN=token_metnin` (Windows: `set DISCORD_TOKEN=...`).
 
@@ -1978,7 +1979,7 @@ tahmin = int(input("Tahminin: "))
 if tahmin == gizli_sayi:
 print("Bildin!")
 else:
-print("Bu kez olmadı.");
+print("Bu kez olmadı.");`
         return `## ${simpler ? 'Daha basit ' : ''}alternatif sayı tahmini\n\n` +
         `${codeFence('python', code)}\n\nBu sürüm tek tahmin alır; önceki döngülü örnekten daha kısa bir alternatiftir.`;
 }
@@ -1994,7 +1995,7 @@ a, op, b = int(sayilar[0]), sayilar[1], int(sayilar[2])
 if op == "+": print(a + b)
 elif op == "-": print(a - b)
 elif op == "*": print(a * b)
-elif op == "/": print(a / b if b else "Sıfıra bölme");
+elif op == "/": print(a / b if b else "Sıfıra bölme");`
         return `## ${simpler ? 'Daha basit ' : ''}alternatif hesap makinesi\n\n` +
         `${codeFence('python', code)}\n\nBu sürüm kullanıcıdan işlemi tek satırda alır; önceki fonksiyon tabanlı örnekten farklı bir yaklaşımdır.`;
 }
@@ -2164,17 +2165,17 @@ function runSlash(userMsg) {
   if (command === '/help' || command === '/yardım') {
     return `# 📖 BilalAI Komutları
 
-`/brainstorm <konu>` → fikir üret
+\`/brainstorm <konu>\` → fikir üret
 
-`/explain <konu>` → konuyu açıkla
+\`/explain <konu>\` → konuyu açıkla
 
-`/compare A vs B` → karşılaştır
+\`/compare A vs B\` → karşılaştır
 
-`/summarize` → metin özetle
+\`/summarize\` → metin özetle
 
-`/code-review` → kod inceleme kontrol listesi
+\`/code-review\` → kod inceleme kontrol listesi
 
-`/debug` → hata ayıklama rehberi;
+\`/debug\` → hata ayıklama rehberi;
   }
   if (command === '/brainstorm') {
     const topic = argument || 'genel konu';
