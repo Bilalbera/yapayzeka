@@ -995,6 +995,7 @@ function generatedCode(language, task, requestText) {
   if (task === 'discord_bot') {
     if (language === 'python') {
       return codeFence('python', `# Kurulum: pip install -U discord.py
+bot.run(token)`);
 
 import os
 import discord
