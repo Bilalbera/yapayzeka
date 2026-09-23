@@ -1016,10 +1016,10 @@ token = os.getenv("DISCORD_TOKEN")
 if not token:
 raise RuntimeError("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
 
-bot.run(token));
+bot.run(token)`);
         }
         if (language === 'javascript') {
-          return codeFence('javascript', // Kurulum: npm install discord.js
+          return codeFence('javascript', `// Kurulum: npm install discord.js
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const client = new Client({
@@ -1027,17 +1027,17 @@ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages,
 GatewayIntentBits.MessageContent]
 });
 
-client.once("ready", () => console.log(`${client.user.tag} hazır.`));
+client.once("ready", () => console.log(\`${client.user.tag} hazır.\`));
 client.on("messageCreate", (message) => {
 if (message.author.bot) return;
-if (message.content === "!merhaba") message.reply(`Merhaba ${message.author}!`);
+if (message.content === "!merhaba") message.reply(\`Merhaba ${message.author}!\`);
 });
 
 if (!process.env.DISCORD_TOKEN) throw new Error("DISCORD_TOKEN eksik.");
-client.login(process.env.DISCORD_TOKEN););
+client.login(process.env.DISCORD_TOKEN);`);
         }
         if (language === 'go') {
-          return codeFence('go', // Kurulum: go get github.com/bwmarrin/discordgo
+          return codeFence('go', `// Kurulum: go get github.com/bwmarrin/discordgo
 package main
 
 import (
@@ -1102,10 +1102,10 @@ return islemler[operator]();
 
 }
 
-console.log(hesapla(23, "", 47)););
+console.log(hesapla(23, "*", 47));`);
         }
         if (language === 'python') {
-          return codeFence('python', def hesapla(a, operator, b):
+          return codeFence('python', `def hesapla(a, operator, b):
 if operator == "+":
 return a + b
 if operator == "-":
@@ -1118,10 +1118,10 @@ raise ValueError("Sıfıra bölme yapılamaz")
 return a / b
 raise ValueError("Geçersiz operatör")
 
-print(hesapla(23, "", 47)));
+print(hesapla(23, "*", 47))`);
         }
         if (language === 'java') {
-          return codeFence('java', public class HesapMakinesi {
+          return codeFence('java', `public class HesapMakinesi {
 public static double hesapla(double a, String operator, double b) {
 switch (operator) {
 case "+": return a + b;
@@ -1269,9 +1269,9 @@ def sifre_uret(uzunluk=16):
 karakterler = string.ascii_letters + string.digits + "!@#$%^&*"
 return "".join(secrets.choice(karakterler) for _ in range(uzunluk))
 
-print(sifre_uret()));
+print(sifre_uret())`);
         }
-        return codeFence('javascript', function sifreUret(uzunluk = 16) {
+        return codeFence('javascript', `function sifreUret(uzunluk = 16) {
 const karakterler = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 return Array.from({ length: uzunluk },
 () => karakterler[Math.floor(Math.random() * karakterler.length)]).join("");
@@ -1309,14 +1309,14 @@ fmt.Println(string(body))
 });
         }
         if (language === 'python') {
-          return codeFence('python', import requests
+          return codeFence('python', `import requests
 
 resp = requests.get("https://example.com")
 print(resp.status_code)
-print(resp.text));
+print(resp.text)`);
         }
         if (language === 'javascript') {
-          return codeFence('javascript', fetch("https://example.com")
+          return codeFence('javascript', `fetch("https://example.com")
 .then((res) => res.text())
 .then((body) => console.log(body))
 .catch((err) => console.error("Hata:", err));`);
@@ -1336,7 +1336,7 @@ if name == "main":
 main());
       }
       if (language === 'htmlcss') {
-        return codeFence('html', <!doctype html>
+        return codeFence('html', `<!doctype html>
 
   <html lang="tr">
   <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${safeTopic}</title></head>
@@ -1364,17 +1364,17 @@ export default ${capitalize(safeTopic.replace(/[^a-zA-Zçğıöşü0-9]/g, '')) 
       }
       // HATA: Java için generic Java iskeleti — asla JavaScript'e düşme
       if (language === 'java') {
-        return codeFence('java', public class Main {
+        return codeFence('java', `public class Main {
 public static void main(String[] args) {
 // İstek: ${safeTopic}
 // Buraya görevin iş kurallarını ekle.
 System.out.println("İş akışı başlatıldı.");
 }
-});
+}`);
       }
       // HATA: Go için generic Go iskeleti — asla JavaScript'e düşme
       if (language === 'go') {
-        return codeFence('go', package main
+        return codeFence('go', `package main
 
 import "fmt"
 
@@ -1382,23 +1382,23 @@ func main() {
 // İstek: ${safeTopic}
 // Buraya görevin iş kurallarını ekle.
 fmt.Println("İş akışı başlatıldı.")
-});
+}`);
       }
       // HATA: Rust için generic Rust iskeleti
       if (language === 'rust') {
-        return codeFence('rust', fn main() {
+        return codeFence('rust', `fn main() {
 // İstek: ${safeTopic}
 // Buraya görevin iş kurallarını ekle.
 println!("İş akışı başlatıldı.");
-});
+}`);
       }
       // HATA: Flutter için generic Dart iskeleti
       if (language === 'flutter') {
-        return codeFence('dart', void main() {
+        return codeFence('dart', `void main() {
 // İstek: ${safeTopic}
 // Buraya görevin iş kurallarını ekle.
 print('İş akışı başlatıldı.');
-});
+}`);
       }
       // Güvenli dil gate'i: istenen dil ile üretilen dil uyuşmazsa dürüst fallback
       if (language && normalizeLang(language) !== 'javascript' &&
@@ -1408,7 +1408,7 @@ print('İş akışı başlatıldı.');
         normalizeLang(language) !== 'git') {
         return unsupportedLanguageResponse(null, language);
       }
-      return codeFence('javascript', function main() {
+      return codeFence('javascript', `function main() {
 // İstek: ${safeTopic}
 // Buraya görevin iş kurallarını ekle.
 console.log("İş akışı başlatıldı.");
@@ -1801,13 +1801,13 @@ ${commandToken}, Discord botlarında belirli bir işlemi başlatan komut olarak 
 
 Basit akış: mesaj gelir → ${commandToken} tanınır → izinler kontrol edilir → komut işlemi çalışır → bot yanıt verir.
 
-Bu açıklamada kod üretmedim.;
+Bu açıklamada kod üretmedim.`;
         }
         const subtopic = typeof conversationState?.subtopic === 'string' &&
           !conversationState.subtopic.startsWith('!')
             ? conversationState.subtopic : '';
         if (subtopic) {
-          return ## Discord botunda ${truncate(subtopic, 80)} nasıl çalışır?
+          return `## Discord botunda ${truncate(subtopic, 80)} nasıl çalışır?
 
 Discord botlarında ${truncate(subtopic, 80)}, botun kullanıcılarla etkileşim kurmasını sağlayan yapıdır. Kullanıcı bir mesaj veya komut gönderdiğinde bot bunu algılar, içeriği değerlendirir ve ${truncate(subtopic, 80)} kapsamındaki işlemi yürütür.
 
@@ -1821,12 +1821,12 @@ Gerekli izin ve koşul kontrolleri yapılır.
 
 Bot, uygun işlemi çalıştırır ve sonucu kullanıcıya gönderir.
 
-Bu açıklamada kod üretmedim.;
+Bu açıklamada kod üretmedim.`;
         }
         const levelText = analysis.userLevel === 'beginner'
           ? 'Başlangıç seviyesinde düşünürsek: '
           : '';
-        return ## Discord botu nasıl çalışır?
+        return `## Discord botu nasıl çalışır?
 
 ${levelText}Discord botu, Discord'un API'sine bağlanan ve sunucudaki olaylara tepki veren bir programdır. Kullanıcı mesaj gönderdiğinde, bir komut kullandığında veya bot hazır olduğunda Discord bir olay iletir; bot da bu olaya göre işlem yapar ve yanıt gönderir.
 
@@ -1921,7 +1921,7 @@ Bu açıklamada kod üretmedim.`;
     if (lang === 'python') {
       return `## Python Discord botunu çalıştırma adımları
 
-discord.py kur: Terminalde `pip install -U discord.py` çalıştır.
+discord.py kur: Terminalde \`pip install -U discord.py\` çalıştır.
 
 Bot dosyasını kaydet: Kodu `bot.py` gibi bir dosyaya kaydet.
 
@@ -1932,7 +1932,7 @@ DISCORD_TOKEN ayarla: Ortam değişkeni olarak `export DISCORD_TOKEN=token_metni
 Çevrimiçi kontrol et: Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.;
    }
    if (lang === 'javascript') {
-     return ## JavaScript Discord botunu çalıştırma adımları
+     return `## JavaScript Discord botunu çalıştırma adımları
 
 discord.js kur: Terminalde `npm install discord.js` çalıştır.
 
@@ -1979,7 +1979,7 @@ if tahmin == gizli_sayi:
 print("Bildin!")
 else:
 print("Bu kez olmadı.");
-        return ## ${simpler ? 'Daha basit ' : ''}alternatif sayı tahmini\n\n+
+        return `## ${simpler ? 'Daha basit ' : ''}alternatif sayı tahmini\n\n` +
          ${codeFence('python', code)}\n\nBu sürüm tek tahmin alır; önceki döngülü örnekten daha kısa bir alternatiftir.`;
 }
 
@@ -1995,7 +1995,7 @@ if op == "+": print(a + b)
 elif op == "-": print(a - b)
 elif op == "*": print(a * b)
 elif op == "/": print(a / b if b else "Sıfıra bölme");
-        return ## ${simpler ? 'Daha basit ' : ''}alternatif hesap makinesi\n\n+
+        return `## ${simpler ? 'Daha basit ' : ''}alternatif hesap makinesi\n\n` +
          ${codeFence('python', code)}\n\nBu sürüm kullanıcıdan işlemi tek satırda alır; önceki fonksiyon tabanlı örnekten farklı bir yaklaşımdır.`;
 }
 
@@ -2178,7 +2178,7 @@ function runSlash(userMsg) {
   }
   if (command === '/brainstorm') {
     const topic = argument || 'genel konu';
-    return # 🧠 Beyin Fırtınası: ${topic}\n\n+
+    return `# 🧠 Beyin Fırtınası: ${topic}\n\n` +
      1. Amaç tanımla — ${topic} ile hangi sorunu çözüyorsun?\n+
       '2. **Küçük parçalara böl** — Büyük hedefi alt görevlere ayır.\n' +
       '3. **Alternatif yaklaşımlar** — En az iki farklı yöntem düşün.\n' +
@@ -2188,17 +2188,17 @@ function runSlash(userMsg) {
   }
   if (command === '/explain') {
     return argument
-      ?${truncate(argument, 120)} konusunu adım adım açıklayabilirim. Önce ne olduğunu, sonra nasıl çalıştığını ve son olarak nerelerde kullanıldığını ele alırım.      : 'Açıklamamı istediğin konuyu/explain <konu>biçiminde yaz.';
+      ? `${truncate(argument, 120)} konusunu adım adım açıklayabilirim. Önce ne olduğunu, sonra nasıl çalıştığını ve son olarak nerelerde kullanıldığını ele alırım.      : 'Açıklamamı istediğin konuyu/explain <konu>biçiminde yaz.';
   }
   if (command === '/compare') {
     const parts = argument.split(/\s+vs\s+/i);
     if (parts.length < 2) return 'Karşılaştırma için/compare A vs Bbiçimini kullan.';
     const [a, b] = parts;
-    return## ${a} vs ${b}\n\n| Özellik | ${a} | ${b} |\n|---|---|---|\n| Tip | Bağlama göre değişir | Bağlama göre değişir |\n| Kullanım | Bağlama göre değişir | Bağlama göre değişir |\n| Performans | Bağlama göre değişir | Bağlama göre değişir |\n| Öğrenme eğrisi | İhtiyaca bağlı | İhtiyaca bağlı |\n\nKullanım senaryonu yazarsan bu tabloyu gerçek ölçütlerle doldurabilirim.;
+    return `## ${a} vs ${b}\n\n| Özellik | ${a} | ${b} |\n|---|---|---|\n| Tip | Bağlama göre değişir | Bağlama göre değişir |\n| Kullanım | Bağlama göre değişir | Bağlama göre değişir |\n| Performans | Bağlama göre değişir | Bağlama göre değişir |\n| Öğrenme eğrisi | İhtiyaca bağlı | İhtiyaca bağlı |\n\nKullanım senaryonu yazarsan bu tabloyu gerçek ölçütlerle doldurabilirim.;
   }
   if (command === '/summarize') {
     return argument
-      ? ${truncate(argument, 200)} metnini özetleyebilirim. Ancak gerçek özet için metnin tamamını göndermen gerekir.      : 'Özetlememi istediğin metni/summarize <metin>biçiminde gönder.';
+      ? `${truncate(argument, 200)} metnini özetleyebilirim. Ancak gerçek özet için metnin tamamını göndermen gerekir.      : 'Özetlememi istediğin metni/summarize <metin>biçiminde gönder.';
   }
   if (command === '/code-review') {
     return 'Kodunu gönderirsen kalite, güvenlik, hata yönetimi, performans ve test başlıklarında inceleyebilirim.';
@@ -2208,7 +2208,7 @@ function runSlash(userMsg) {
   }
   if (command === '/content-enhance' || command === '/content:enhance') {
     return argument
-      ?Metni şu başlıklarda iyileştirebilirim: yapı, açıklık, ton, başlık ve çağrı. Metin: ${truncate(argument, 300)}      : 'İyileştirmem için metni/content-enhance <metin>` biçiminde gönder.';
+      ? `Metni şu başlıklarda iyileştirebilirim: yapı, açıklık, ton, başlık ve çağrı. Metin: ${truncate(argument, 300)}      : 'İyileştirmem için metni/content-enhance <metin>` biçiminde gönder.';
 }
 return null;
 }
