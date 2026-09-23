@@ -1366,16 +1366,45 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
     const mm = MODELS[modelKey] || MODELS.flash;
     showThinking(modelKey);
     const delay = randInt(mm.thinkingMs[0], mm.thinkingMs[1]);
-    setTimeout(() => {
-      removeThinking();
-      const reply = [
-        `Merhaba **Kurucum Bilal**. 👑`,
-        `Sistem mesajınızı aldım ve hemen inceledim:\n`,
-        `> *"${truncate(text.trim(), 180)}"*\n`,
-        `Talebiniz doğrultusunda kendimi güncelliyor, daha doğru ve **yetkin** yanıtlar verebilmek için gelişim motorumu çalıştırıyorum.`,
-        `\nHer daim hizmetinizdeyim, saygılarımla. 🛡️⚡ — ${mm.name}`
-      ].join('\n');
-      const aiMsg = {
+setTimeout(async () => {
+  try {
+    const replyText = await generateResponse(text, modelKey, chat);
+
+    removeThinking();
+
+    const aiMsg = {
+      id: uid(),
+      role: 'assistant',
+      content: replyText,
+      timestamp: new Date().toISOString(),
+      feedback: null,
+      model: modelKey
+    };
+
+    chat.messages.push(aiMsg);
+    chat.updatedAt = new Date().toISOString();
+    saveChats();
+    appendMessageEl(aiMsg);
+  } catch (e) {
+    removeThinking();
+
+    console.error('[BilalAI] sendMessage HATASI:', e);
+
+    const aiMsg = {
+      id: uid(),
+      role: 'assistant',
+      content: '⚠️ Yanıt oluşturulurken beklenmeyen bir hata oluştu.',
+      timestamp: new Date().toISOString(),
+      feedback: null,
+      model: modelKey
+    };
+
+    chat.messages.push(aiMsg);
+    chat.updatedAt = new Date().toISOString();
+    saveChats();
+    appendMessageEl(aiMsg);
+  }
+}, delay);
         id: uid(),
         role: 'assistant',
         content: reply,
@@ -2424,7 +2453,16 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
     applyModelToUI();
     autoResizeTextarea();
     bindEvents();
-    console.log('%c⚡ BilalAI 1.0 - Flash çalışıyor...', 'color:#00BFFF;font-size:14px;font-weight:bold;');
+console.log(
+  '%c⚡ BilalAI 1.2 - Flash r6 çalışıyor...',
+  'color:#00BFFF;font-size:14px;font-weight:bold;'
+);
+
+console.log('[BilalAI] Runtime model:', {
+  name: window.BilalAIResponseEngine?.MODEL?.name,
+  version: window.BilalAIResponseEngine?.MODEL?.version,
+  engine: typeof window.BilalAIResponseEngine?.generate
+});
   }
 
   if (document.readyState === 'loading') {
