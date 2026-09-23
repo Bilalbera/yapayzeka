@@ -1894,13 +1894,13 @@ function contextualTaskGuidance(text, conversationState) {
   if ((state.task === 'discord_bot' || hasAny(text, ['discord bot', 'discord botu'])) &&
     hasAny(text, ['komutlar nasıl', 'komutlar nasıl çalışıyor', 'komutlar nasıl çalışır',
       'komut nedir', 'komutlar nedir'])) {
-    return `## Discord botunda komutlar nasıl çalışıyor?
+return `## Discord botunda komutlar nasıl çalışıyor?
 
 Discord botlarında komutlar, botun belirli mesaj biçimlerine verdiği tepkilerdir. Kullanıcı `!` gibi bir ön ek ile başlayan bir mesaj gönderdiğinde bot bunu algılar.
 
 Temel akış:
 
-Kullanıcı bir mesaj gönderir (örn. `!merhaba`).
+Kullanıcı bir mesaj gönderir (örn. \`!merhaba\`).
 
 Bot mesajı alır ve komut ön ekini tanır.
 
@@ -1929,7 +1929,7 @@ DISCORD_TOKEN ayarla: Ortam değişkeni olarak `export DISCORD_TOKEN=token_metni
 
 Çalıştır: Terminalde `python bot.py` (bazı sistemlerde `python3 bot.py`).
 
-Çevrimiçi kontrol et: Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.;
+Çevrimiçi kontrol et: Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.`;
    }
    if (lang === 'javascript') {
      return `## JavaScript Discord botunu çalıştırma adımları
@@ -1980,7 +1980,7 @@ print("Bildin!")
 else:
 print("Bu kez olmadı.");
         return `## ${simpler ? 'Daha basit ' : ''}alternatif sayı tahmini\n\n` +
-         ${codeFence('python', code)}\n\nBu sürüm tek tahmin alır; önceki döngülü örnekten daha kısa bir alternatiftir.`;
+        `${codeFence('python', code)}\n\nBu sürüm tek tahmin alır; önceki döngülü örnekten daha kısa bir alternatiftir.`;
 }
 
   // Hesap makinesi için alternatif
@@ -1996,7 +1996,7 @@ elif op == "-": print(a - b)
 elif op == "*": print(a * b)
 elif op == "/": print(a / b if b else "Sıfıra bölme");
         return `## ${simpler ? 'Daha basit ' : ''}alternatif hesap makinesi\n\n` +
-         ${codeFence('python', code)}\n\nBu sürüm kullanıcıdan işlemi tek satırda alır; önceki fonksiyon tabanlı örnekten farklı bir yaklaşımdır.`;
+        `${codeFence('python', code)}\n\nBu sürüm kullanıcıdan işlemi tek satırda alır; önceki fonksiyon tabanlı örnekten farklı bir yaklaşımdır.`;
 }
 
   // Teaching konusu için kodsuz alternatif
@@ -2178,27 +2178,31 @@ function runSlash(userMsg) {
   }
   if (command === '/brainstorm') {
     const topic = argument || 'genel konu';
-    return `# 🧠 Beyin Fırtınası: ${topic}\n\n` +
-     1. Amaç tanımla — ${topic} ile hangi sorunu çözüyorsun?\n+
-      '2. **Küçük parçalara böl** — Büyük hedefi alt görevlere ayır.\n' +
-      '3. **Alternatif yaklaşımlar** — En az iki farklı yöntem düşün.\n' +
-      '4. **Risk ve avantaj** — Her yöntemin artılarını ve eksilerini yaz.\n' +
-      '5. **Önceliklendir** — En düşük riskle en yüksek değer veren yöntemi seç.\n\n' +
-      'Hangi yönde derinleşmemi istersen yaz.';
+return `# 🧠 Beyin Fırtınası: ${topic}
+
+1. Amaç tanımla — ${topic} ile hangi sorunu çözüyorsun?
+2. **Küçük parçalara böl** — Büyük hedefi alt görevlere ayır.
+3. **Alternatif yaklaşımlar** — En az iki farklı yöntem düşün.
+4. **Risk ve avantaj** — Her yöntemin artılarını ve eksilerini yaz.
+5. **Önceliklendir** — En düşük riskle en yüksek değer veren yöntemi seç.
+
+Hangi yönde derinleşmemi istersen yaz.`;
   }
   if (command === '/explain') {
-    return argument
-      ? `${truncate(argument, 120)} konusunu adım adım açıklayabilirim. Önce ne olduğunu, sonra nasıl çalıştığını ve son olarak nerelerde kullanıldığını ele alırım.      : 'Açıklamamı istediğin konuyu/explain <konu>biçiminde yaz.';
+return argument
+  ? `${truncate(argument, 120)} konusunu adım adım açıklayabilirim. Önce ne olduğunu, sonra nasıl çalıştığını ve son olarak nerelerde kullanıldığını ele alırım.`
+  : 'Açıklamamı istediğin konuyu /explain <konu> biçiminde yaz.';
   }
   if (command === '/compare') {
     const parts = argument.split(/\s+vs\s+/i);
     if (parts.length < 2) return 'Karşılaştırma için/compare A vs Bbiçimini kullan.';
     const [a, b] = parts;
-    return `## ${a} vs ${b}\n\n| Özellik | ${a} | ${b} |\n|---|---|---|\n| Tip | Bağlama göre değişir | Bağlama göre değişir |\n| Kullanım | Bağlama göre değişir | Bağlama göre değişir |\n| Performans | Bağlama göre değişir | Bağlama göre değişir |\n| Öğrenme eğrisi | İhtiyaca bağlı | İhtiyaca bağlı |\n\nKullanım senaryonu yazarsan bu tabloyu gerçek ölçütlerle doldurabilirim.;
+    return `## ${a} vs ${b}\n\n| Özellik | ${a} | ${b} |\n|---|---|---|\n| Tip | Bağlama göre değişir | Bağlama göre değişir |\n| Kullanım | Bağlama göre değişir | Bağlama göre değişir |\n| Performans | Bağlama göre değişir | Bağlama göre değişir |\n| Öğrenme eğrisi | İhtiyaca bağlı | İhtiyaca bağlı |\n\nKullanım senaryonu yazarsan bu tabloyu gerçek ölçütlerle doldurabilirim.`;
   }
   if (command === '/summarize') {
-    return argument
-      ? `${truncate(argument, 200)} metnini özetleyebilirim. Ancak gerçek özet için metnin tamamını göndermen gerekir.      : 'Özetlememi istediğin metni/summarize <metin>biçiminde gönder.';
+return argument
+  ? `${truncate(argument, 200)} metnini özetleyebilirim. Ancak gerçek özet için metnin tamamını göndermen gerekir.`
+  : 'Özetlememi istediğin metni /summarize <metin> biçiminde gönder.';
   }
   if (command === '/code-review') {
     return 'Kodunu gönderirsen kalite, güvenlik, hata yönetimi, performans ve test başlıklarında inceleyebilirim.';
@@ -2207,8 +2211,9 @@ function runSlash(userMsg) {
     return 'Hata mesajını, ilgili kodu ve beklenen/gerçekleşen davranışı gönder. Kök nedeni adım adım ayırabiliriz.';
   }
   if (command === '/content-enhance' || command === '/content:enhance') {
-    return argument
-      ? `Metni şu başlıklarda iyileştirebilirim: yapı, açıklık, ton, başlık ve çağrı. Metin: ${truncate(argument, 300)}      : 'İyileştirmem için metni/content-enhance <metin>` biçiminde gönder.';
+return argument
+  ? `Metni şu başlıklarda iyileştirebilirim: yapı, açıklık, ton, başlık ve çağrı. Metin: ${truncate(argument, 300)}`
+  : 'İyileştirmem için metni /content-enhance <metin> biçiminde gönder.';
 }
 return null;
 }
