@@ -1006,7 +1006,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-print(f"{bot.user} olarak giriş yapıldı.")
+    print(f"{bot.user} olarak giriş yapıldı.")
 
 @bot.command()
 async def merhaba(ctx):
@@ -1110,7 +1110,7 @@ if operator == "+":
 return a + b
 if operator == "-":
 return a - b
-if operator == "":
+if operator == "*":
 return a * b
 if operator == "/":
 if b == 0:
@@ -1126,7 +1126,7 @@ public static double hesapla(double a, String operator, double b) {
 switch (operator) {
 case "+": return a + b;
 case "-": return a - b;
-case "": return a * b;
+case "*": return a * b;
 case "/":
 if (b == 0) throw new ArithmeticException("Sıfıra bölme yapılamaz");
 return a / b;
@@ -1897,7 +1897,7 @@ function contextualTaskGuidance(text, conversationState) {
       'komut nedir', 'komutlar nedir'])) {
 return `## Discord botunda komutlar nasıl çalışıyor?
 
-Discord botlarında komutlar, botun belirli mesaj biçimlerine verdiği tepkilerdir. Kullanıcı `!` gibi bir ön ek ile başlayan bir mesaj gönderdiğinde bot bunu algılar.
+Discord botlarında komutlar, botun belirli mesaj biçimlerine verdiği tepkilerdir. Kullanıcı \`!\` gibi bir ön ek ile başlayan bir mesaj gönderdiğinde bot bunu algılar.
 
 Temel akış:
 
@@ -2176,6 +2176,7 @@ function runSlash(userMsg) {
 \`/code-review\` → kod inceleme kontrol listesi
 
 \`/debug\` → hata ayıklama rehberi;
+`;
   }
   if (command === '/brainstorm') {
     const topic = argument || 'genel konu';
