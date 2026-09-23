@@ -533,8 +533,35 @@
   <div class="toast" id="toast"></div>
 
   <!-- Scriptler (sıra önemli: önce model, sonra ana uygulama) -->
-  <script src="model.js"></script>
-  <script src="flashlitemodel.js"></script>
-  <script src="script.js"></script>
+<script>
+window.addEventListener("error", function (e) {
+  console.error("🔥 JS HATASI:", {
+    message: e.message,
+    filename: e.filename,
+    line: e.lineno,
+    column: e.colno,
+    error: e.error
+  });
+});
+</script>
+
+<script src="./model.js?v=20260923r6"></script>
+
+<script>
+console.log("========== MODEL.JS TEST ==========");
+console.log("BilalAIResponseEngine tipi:", typeof window.BilalAIResponseEngine);
+
+if (window.BilalAIResponseEngine) {
+  console.log("MODEL:", window.BilalAIResponseEngine.MODEL);
+  console.log("generate:", typeof window.BilalAIResponseEngine.generate);
+  console.log("generateAsync:", typeof window.BilalAIResponseEngine.generateAsync);
+  console.log("runSelfTests:", typeof window.BilalAIResponseEngine.runSelfTests);
+} else {
+  console.error("❌ model.js çalışmadı veya Engine oluşturulmadı!");
+}
+</script>
+
+<script src="./flashlitemodel.js"></script>
+<script src="./script.js"></script>
 </body>
 </html>
