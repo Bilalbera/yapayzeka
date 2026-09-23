@@ -201,7 +201,7 @@
     // için bu fiilleri hasTurkishRoot benzeri mantıkla, eksiz biçimde
     // arıyoruz: "yap" eşleşir, "yapıyorum"/"yaptım"/"yapacak" eşleşmez.
     const PRODUCTION_VERBS = Object.freeze([
-      'yap', 'oluştur', 'geliştir', 'yaz', 'kur'
+      'yap', 'oluştur', 'geliştir', 'yaz', 'kur', 'hazırla'
     ]);
 
     // Çekimli (progressive/geçmiş/gelecek/istek) biçimler — kod üretimi
@@ -750,7 +750,13 @@
       const t = norm(text);
   
       if (/\b(python\w*|django|flask|pandas|numpy|pip)\b/iu.test(t)) return 'python';
-      if (/\b(typescript|javascript|node|nodejs|nextjs|next\.js|npm)\b/i.test(t)) return 'javascript';
+
+      // HATA: JavaScript MUTLAKA Java'dan önce kontrol edilmeli.
+      // "java script" (iki kelime) ve "js" → javascript, "java" → java.
+      if (/\b(typescript|javascript|node|nodejs|nextjs|next\.js|npm)\b/i.test(t) ||
+        hasAny(t, ['java script', 'js'])) {
+        return 'javascript';
+      }
       if (/\b(java|kotlin)\b/i.test(t)) return 'java';
       if (/\b(go|golang)\b/i.test(t)) return 'go';
       if (/\b(rust|cargo)\b/i.test(t)) return 'rust';
@@ -772,6 +778,17 @@
       const t = norm(text);
       if (!isCodeGenerationRequest(t)) return null;
       return detectLanguageHint(t);
+    }
+
+    // Dil normalizasyonu — "java script" → "javascript", "js" → "javascript"
+    function normalizeLang(lang) {
+      if (!lang) return null;
+      const l = norm(lang).replace(/\s+/g, '');
+      if (l === 'javascript' || l === 'js') return 'javascript';
+      if (l === 'go' || l === 'golang') return 'go';
+      if (l === 'python') return 'python';
+      if (l === 'java') return 'java';
+      return l;
     }
   
     function detectCodeComplexity(text) {
@@ -815,6 +832,7 @@
       if (hasAny(t, ['sayı oyunu', 'oyun yap', 'oyunu nasıl', 'oyunu yapmak', 'oyun yapmak', 'basit bir oyun']) ||
         (hasAny(t, ['minecraft', 'korku', 'oyun']) && hasAny(t, ['yap', 'başla', 'nereden']))) return 'game';
       if (hasAny(t, ['hello world', 'merhaba dünya'])) return 'hello';
+      if (hasAny(t, ['http isteği', 'http istek', 'http request', 'api isteği', 'get isteği'])) return 'http_request';
       return null;
     }
   
@@ -862,22 +880,23 @@
 
     /* ===== HATA 6: Görev başına desteklenen diller ===== */
     const SUPPORTED_CODE_TASKS = Object.freeze({
-      discord_bot: ['python', 'javascript'],
-      calculator: ['python', 'javascript'],
+      discord_bot: ['python', 'javascript', 'go'],
+      calculator: ['python', 'javascript', 'java'],
       login_ui: ['htmlcss', 'react'],
       guess_game: ['python', 'javascript'],
       game: ['python', 'javascript'],
       todo: ['python', 'javascript'],
       password: ['python', 'javascript'],
-      hello: ['python', 'javascript'],
-      add: ['python', 'javascript'],
-      subtract: ['python', 'javascript'],
-      multiply: ['python', 'javascript'],
-      divide: ['python', 'javascript'],
-      factorial: ['python', 'javascript'],
-      fibonacci: ['python', 'javascript'],
-      prime: ['python', 'javascript'],
-      palindrome: ['python', 'javascript']
+      hello: ['python', 'javascript', 'java', 'go'],
+      add: ['python', 'javascript', 'java'],
+      subtract: ['python', 'javascript', 'java'],
+      multiply: ['python', 'javascript', 'java'],
+      divide: ['python', 'javascript', 'java'],
+      factorial: ['python', 'javascript', 'java'],
+      fibonacci: ['python', 'javascript', 'java'],
+      prime: ['python', 'javascript', 'java'],
+      palindrome: ['python', 'javascript', 'java'],
+      http_request: ['go', 'python', 'javascript']
     });
 
     const TASK_LABELS = Object.freeze({
@@ -896,13 +915,14 @@
       factorial: 'faktöriyel',
       fibonacci: 'fibonacci',
       prime: 'asal sayı',
-      palindrome: 'palindrom'
+      palindrome: 'palindrom',
+      http_request: 'HTTP isteği'
     });
 
     function isSupportedTask(task, language) {
+      if (!task) return true; // null görev → generic generator ele eder
       const supported = SUPPORTED_CODE_TASKS[task];
-      if (!supported) return true; // bilinmeyen görevde genel üretim serbest
-      return supported.includes(language);
+      return supported ? supported.includes(language) : false;
     }
 
     function unsupportedLanguageResponse(task, language) {
@@ -940,6 +960,20 @@
           fibonacci: 'let a = 0;\nlet b = 1;\nfor (let i = 0; i < 10; i += 1) {\n  console.log(a);\n  [a, b] = [b, a + b];\n} ',
           prime: 'function asalMi(sayi) {\n  if (sayi < 2) return false;\n  for (let i = 2; i <= Math.sqrt(sayi); i += 1) {\n    if (sayi % i === 0) return false;\n  }\n  return true;\n}\n\nconsole.log(asalMi(17));',
           guess_game: 'const gizli = Math.floor(Math.random() * 100) + 1;\nconst { createInterface } = require("readline");\nconst rl = createInterface({ input: process.stdin, output: process.stdout });\n\nfunction soru() {\n  rl.question("Tahminin: ", (tahmin) => {\n    const t = Number(tahmin);\n    if (t === gizli) { console.log("Bildin!"); rl.close(); }\n    else { console.log(t < gizli ? "Daha yüksek." : "Daha düşük."); soru(); }\n  });\n}\nsoru();'
+        },
+        java: {
+          hello: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello");\n    }\n}',
+          add: 'public class Main {\n    public static void main(String[] args) {\n        int a = 5, b = 3;\n        System.out.println(a + b);\n    }\n}',
+          subtract: 'public class Main {\n    public static void main(String[] args) {\n        int a = 10, b = 4;\n        System.out.println(a - b);\n    }\n}',
+          multiply: 'public class Main {\n    public static void main(String[] args) {\n        int a = 6, b = 7;\n        System.out.println(a * b);\n    }\n}',
+          divide: 'public class Main {\n    public static void main(String[] args) {\n        int a = 20, b = 4;\n        System.out.println(a / b);\n    }\n}',
+          factorial: 'public class Main {\n    static int faktoriyel(int n) {\n        return n <= 1 ? 1 : n * faktoriyel(n - 1);\n    }\n    public static void main(String[] args) {\n        System.out.println(faktoriyel(5));\n    }\n}',
+          fibonacci: 'public class Main {\n    public static void main(String[] args) {\n        int a = 0, b = 1;\n        for (int i = 0; i < 10; i++) {\n            System.out.print(a + " ");\n            int t = a + b;\n            a = b;\n            b = t;\n        }\n    }\n}',
+          prime: 'public class Main {\n    static boolean asalMi(int sayi) {\n        if (sayi < 2) return false;\n        for (int i = 2; i <= Math.sqrt(sayi); i++) {\n            if (sayi % i == 0) return false;\n        }\n        return true;\n    }\n    public static void main(String[] args) {\n        System.out.println(asalMi(17));\n    }\n}',
+          palindrome: 'public class Main {\n    static boolean palindromMu(String s) {\n        return s.equals(new StringBuilder(s).reverse().toString());\n    }\n    public static void main(String[] args) {\n        System.out.println(palindromMu("kayak"));\n    }\n}'
+        },
+        go: {
+          hello: 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello")\n}'
         }
       };
       const languageSamples = samples[language] || {};
@@ -1001,6 +1035,49 @@
   if (!process.env.DISCORD_TOKEN) throw new Error("DISCORD_TOKEN eksik.");
   client.login(process.env.DISCORD_TOKEN);`);
         }
+        if (language === 'go') {
+          return codeFence('go', `// Kurulum: go get github.com/bwmarrin/discordgo
+package main
+
+import (
+    "fmt"
+    "log"
+    "os"
+
+    "github.com/bwmarrin/discordgo"
+)
+
+func main() {
+    token := os.Getenv("DISCORD_TOKEN")
+    if token == "" {
+        log.Fatal("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
+    }
+
+    dg, err := discordgo.New("Bot " + token)
+    if err != nil {
+        log.Fatal("Bot oluşturulamadı:", err)
+    }
+
+    dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+        if m.Author.Bot {
+            return
+        }
+        if m.Content == "!merhaba" {
+            s.ChannelMessageSend(m.ChannelID, "Merhaba!")
+        }
+    })
+
+    dg.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentGuildMessages
+
+    if err := dg.Open(); err != nil {
+        log.Fatal("Bağlantı açılamadı:", err)
+    }
+    defer dg.Close()
+
+    fmt.Println("Bot çalışıyor. Ctrl+C ile durdur.")
+    select {}
+}`);
+        }
         // Desteklenmeyen Discord bot dili
         return unsupportedLanguageResponse('discord_bot', language);
       }
@@ -1038,6 +1115,24 @@
       raise ValueError("Geçersiz operatör")
   
   print(hesapla(23, "*", 47))`);
+        }
+        if (language === 'java') {
+          return codeFence('java', `public class HesapMakinesi {
+    public static double hesapla(double a, String operator, double b) {
+        switch (operator) {
+            case "+": return a + b;
+            case "-": return a - b;
+            case "*": return a * b;
+            case "/":
+                if (b == 0) throw new ArithmeticException("Sıfıra bölme yapılamaz");
+                return a / b;
+            default: throw new IllegalArgumentException("Geçersiz operatör");
+        }
+    }
+    public static void main(String[] args) {
+        System.out.println(hesapla(23, "*", 47));
+    }
+}`);
         }
         return unsupportedLanguageResponse('calculator', language);
       }
@@ -1179,6 +1274,49 @@ export default Login;`);
   console.log(sifreUret());`);
       }
   
+      // HTTP isteği
+      if (task === 'http_request') {
+        if (language === 'go') {
+          return codeFence('go', `package main
+
+import (
+    "fmt"
+    "io"
+    "net/http"
+)
+
+func main() {
+    resp, err := http.Get("https://example.com")
+    if err != nil {
+        fmt.Println("İstek hatası:", err)
+        return
+    }
+    defer resp.Body.Close()
+
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        fmt.Println("Okuma hatası:", err)
+        return
+    }
+    fmt.Println(string(body))
+}`);
+        }
+        if (language === 'python') {
+          return codeFence('python', `import requests
+
+resp = requests.get("https://example.com")
+print(resp.status_code)
+print(resp.text)`);
+        }
+        if (language === 'javascript') {
+          return codeFence('javascript', `fetch("https://example.com")
+  .then((res) => res.text())
+  .then((body) => console.log(body))
+  .catch((err) => console.error("Hata:", err));`);
+        }
+        return unsupportedLanguageResponse('http_request', language);
+      }
+
       // Bilinmeyen görevlerde Hello örneğine düşmek yerine isteğin konusuna
       // uygun, açıkça genişletilebilir bir başlangıç iskeleti üret.
       if (language === 'python') {
@@ -1215,6 +1353,52 @@ function ${capitalize(safeTopic.replace(/[^a-zA-Zçğıöşü0-9]/g, '')) || 'Bi
 }
 
 export default ${capitalize(safeTopic.replace(/[^a-zA-Zçğıöşü0-9]/g, '')) || 'Bilesen'};`);
+      }
+      // HATA: Java için generic Java iskeleti — asla JavaScript'e düşme
+      if (language === 'java') {
+        return codeFence('java', `public class Main {
+    public static void main(String[] args) {
+        // İstek: ${safeTopic}
+        // Buraya görevin iş kurallarını ekle.
+        System.out.println("İş akışı başlatıldı.");
+    }
+}`);
+      }
+      // HATA: Go için generic Go iskeleti — asla JavaScript'e düşme
+      if (language === 'go') {
+        return codeFence('go', `package main
+
+import "fmt"
+
+func main() {
+    // İstek: ${safeTopic}
+    // Buraya görevin iş kurallarını ekle.
+    fmt.Println("İş akışı başlatıldı.")
+}`);
+      }
+      // HATA: Rust için generic Rust iskeleti
+      if (language === 'rust') {
+        return codeFence('rust', `fn main() {
+    // İstek: ${safeTopic}
+    // Buraya görevin iş kurallarını ekle.
+    println!("İş akışı başlatıldı.");
+}`);
+      }
+      // HATA: Flutter için generic Dart iskeleti
+      if (language === 'flutter') {
+        return codeFence('dart', `void main() {
+  // İstek: ${safeTopic}
+  // Buraya görevin iş kurallarını ekle.
+  print('İş akışı başlatıldı.');
+}`);
+      }
+      // Güvenli dil gate'i: istenen dil ile üretilen dil uyuşmazsa dürüst fallback
+      if (language && normalizeLang(language) !== 'javascript' &&
+        normalizeLang(language) !== 'react' &&
+        normalizeLang(language) !== 'htmlcss' &&
+        normalizeLang(language) !== 'sql' &&
+        normalizeLang(language) !== 'git') {
+        return unsupportedLanguageResponse(null, language);
       }
       return codeFence('javascript', `function main() {
     // İstek: ${safeTopic}
@@ -1547,6 +1731,8 @@ Bu açıklamada kod üretmedim.`;
     }
   
     function knownKnowledgeResponse(text, type) {
+      // Güncellik sinyali varsa yerel bilgi tabanı yetersizdir
+      if (hasAny(norm(text), FRESHNESS_SIGNALS)) return null;
       for (const [key, answer] of Object.entries(KNOWN_KNOWLEDGE)) {
         const matchesKey = hasAny(text, [key]) ||
           (key === 'python' && /\bpython\w*\b/iu.test(norm(text)));
@@ -1583,6 +1769,10 @@ Bu açıklamada kod üretmedim.`;
       }
       const known = knownKnowledgeResponse(text, type);
       if (known) return known;
+      // Güncellik sinyali varsa web yönlendirmesi
+      if (hasAny(norm(text), FRESHNESS_SIGNALS)) {
+        return 'Bu soru güncel bilgi gerektiriyor. Web araştırması yaparak cevap verebilirim — `generateAsync` kullan.';
+      }
       return unknownKnowledgeResponse(topic, type, conversationState);
     }
   
@@ -1834,14 +2024,33 @@ Bu açıklamada kod üretmedim.`;
       return genres.find(([, words]) => hasAny(t, words))?.[0] || null;
     }
   
+    function parseCount(text) {
+      const t = norm(text);
+      // "5 tane", "5 adet"
+      const m = t.match(/(\d+)\s*(tane|adet)/);
+      if (m) return Number(m[1]);
+      // "beş tane", "beş adet"
+      const wordNumbers = {
+        'bir': 1, 'iki': 2, 'üç': 3, 'dört': 4, 'beş': 5,
+        'altı': 6, 'yedi': 7, 'sekiz': 8, 'dokuz': 9, 'on': 10
+      };
+      for (const [word, num] of Object.entries(wordNumbers)) {
+        if (new RegExp(`${word}\\s*(tane|adet)`, 'u').test(t)) return num;
+      }
+      return null;
+    }
+
     function detectRecommendation(text) {
       const t = norm(text);
-      const request = hasAny(t, [
+      const originalVerbs = hasAny(t, [
         'öner', 'öneri', 'tavsiye', 'ne izleyeyim', 'ne okuyayım',
         'ne dinleyeyim', 'ne yiyeyim', 'seç'
       ]);
-      if (!request) return null;
-  
+      const broadVerbs = hasAny(t, [
+        'söyle', 'göster', 'listele', 'say', 'ver', 'bul'
+      ]);
+      if (!originalVerbs && !broadVerbs) return null;
+
       let category = null;
       if (/\b(film|filim|dizi|izle)\w*/u.test(t)) category = 'movie';
       else if (/\b(kitap|oku)\w*/u.test(t)) category = 'book';
@@ -1849,13 +2058,23 @@ Bu açıklamada kod üretmedim.`;
       else if (/\b(yemek|pişir|menü|tarif|yiyecek)\w*/u.test(t)) category = 'food';
       else if (/\b(şehir|gezi|tatil|nereye)\w*/u.test(t)) category = 'city';
       else if (/\b(oyun|oyna)\w*/u.test(t)) category = 'game';
-  
+
       const yearMatch = textOf(text).match(/\b(19|20)\d{2}\b/);
+      const year = yearMatch ? Number(yearMatch[0]) : null;
+      const count = parseCount(t);
+
+      // Geniş fiiller (söyle, göster, vb.) en az bir kategori/yıl/sayı
+      // gerektirir; tek başına öneri tetiklemesin.
+      if (!originalVerbs && broadVerbs && !category && !year && !count) {
+        return null;
+      }
+
       return {
         intent: 'recommendation',
         category,
         genre: category === 'movie' ? detectMovieGenre(text) : null,
-        year: yearMatch ? Number(yearMatch[0]) : null
+        year,
+        count
       };
     }
   
@@ -2061,16 +2280,28 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
       clear() { this._store.clear(); }
     };
 
-    // Web gerektiren sinyaller
-    const WEB_SIGNALS = Object.freeze([
+    // Açık güncellik/web sinyalleri — en yüksek öncelik
+    const FRESHNESS_SIGNALS = Object.freeze([
+      'en son', 'son sürüm', 'en son sürüm', 'güncel sürüm', 'güncel',
+      'en yeni', 'son duyuru', 'güncel duyuru',
+      'bugün', 'bugünkü', 'şu an', 'şimdi',
+      'son zamanlarda', 'yakın zamanda',
+      'latest', 'newest', 'current', 'news', 'haber',
       'bugünkü haber', 'güncel haber', 'günün haber',
       'güncel hava', 'hava durumu', 'bugün hava',
-      'son sürüm', 'en son sürüm', 'güncel sürüm',
-      'son duyuru', 'güncel duyuru',
       'şu anki fiyat', 'güncel fiyat', 'bugünkü fiyat',
-      'en son', 'son zamanlarda', 'yakın zamanda',
       'bugün ne', 'bu hafta', 'bu ay'
     ]);
+
+    // Konu yerel bilgi tabanında var mı?
+    function isKnownLocalTopic(text) {
+      const t = norm(text);
+      for (const key of Object.keys(KNOWN_KNOWLEDGE)) {
+        if (hasAny(t, [key])) return true;
+      }
+      if (detectProgrammingSubtopic(t)) return true;
+      return false;
+    }
 
     // Web GEREKMEYEN durumlar
     function isLocalOnly(text, analysis) {
@@ -2098,20 +2329,22 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
     function needsWebSearch(text, analysis) {
       const t = norm(text);
 
-    // Yerel sistem zaten hallediyorsa web'e gitme
-      if (isLocalOnly(text, analysis)) return false;
+      // A) Açık güncellik/web sinyalleri — en yüksek öncelik
+      if (hasAny(t, FRESHNESS_SIGNALS)) return true;
 
-      // Açık web sinyalleri
-      if (hasAny(t, WEB_SIGNALS)) return true;
+      // Belirli gelecek/güncel yıl ifadeleri (2024-2039)
+      if (/\b(202[4-9]|203[0-9])\b/.test(textOf(text))) return true;
 
-      // Yılla film önerisi → güncel veri gerekir
+      // B) Yıl + öneri/liste isteği
       const rec = detectRecommendation(text);
       if (rec && rec.year) return true;
 
-      // "2026'da" gibi gelecek/yıl referansları
-      if (/\b(202[4-9]|203[0-9])\b/.test(textOf(text))) {
-        if (hasAny(t, ['çıkan', 'yayınlanan', 'öner', 'tavsiye', 'haber'])) return true;
-      }
+      // C) Bilgi sorusu + konu yerel bilgi tabanında yoksa web
+      const questionType = detectQuestionType(text);
+      if (questionType && !isKnownLocalTopic(t)) return true;
+
+      // D) Bunların hiçbiri yoksa local-only sonucu uygulanabilir
+      if (isLocalOnly(text, analysis)) return false;
 
       return false;
     }
@@ -2144,12 +2377,41 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
       return parts.join(' ') || t;
     }
 
+    function normalizeWebResults(rawResults) {
+      if (!Array.isArray(rawResults)) return [];
+      return rawResults.map((r) => ({
+        title: textOf(r.title || r.name || '').trim() || 'Sonuç',
+        source: textOf(r.source || r.site || '').trim() || null,
+        url: textOf(r.url || r.link || r.href || '').trim() || null,
+        snippet: truncate(textOf(r.snippet || r.description || r.summary || r.content || ''), 300),
+        date: textOf(r.date || r.publishedAt || r.published || '').trim() || null
+      })).filter((r) => r.url || r.snippet);
+    }
+
     function formatWebResults(results) {
       if (!results || !results.length) return null;
       const lines = results.slice(0, 5).map((r, i) =>
         `**${i + 1}.** ${r.title || 'Sonuç'}${r.url ? ` — [${r.url}](${r.url})` : ''}${r.snippet ? `\n   ${truncate(r.snippet, 200)}` : ''}`
       );
       return `Web araştırması sonucunda bulduklarım:\n\n${lines.join('\n\n')}`;
+    }
+
+    function synthesizeWebResponse(original, rawResults) {
+      const normalized = normalizeWebResults(rawResults);
+      if (!normalized.length) return null;
+      const topResults = normalized.slice(0, 5);
+      const lines = topResults.map((r, i) => {
+        const parts = [`**${i + 1}.** ${r.title}`];
+        if (r.snippet) parts.push(`   ${r.snippet}`);
+        const meta = [];
+        if (r.source) meta.push(r.source);
+        if (r.date) meta.push(r.date);
+        if (r.url) meta.push(`[link](${r.url})`);
+        if (meta.length) parts.push(`   _${meta.join(' · ')}_`);
+        return parts.join('\n');
+      });
+      return `Web araştırması sonucunda bulduklarım:\n\n${lines.join('\n\n')}\n\n` +
+        `_Kaynaklar yukarıda belirtilmiştir. Bilgileri doğrulamak için kaynak linklerine bakabilirsin._`;
     }
 
     /* ============== ANA API ============== */
@@ -2251,7 +2513,7 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
       }
   
       // 6. Öneriler
-      const recommendation = detectRecommendation(raw);
+      const recommendation = detectRecommendation(original);
       if (recommendation) {
         return retryPrelude + recommendationResponse(recommendation);
       }
@@ -2408,7 +2670,7 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
       // Cache kontrolü
       const cached = webCache.get(searchQuery);
       if (cached) {
-        return formatWebResults(cached.results) ||
+        return synthesizeWebResponse(original, cached.results) ||
           'Güncel bilgi kaynağına şu anda erişemiyorum. Daha sonra tekrar deneyebilirsin.';
       }
 
@@ -2428,8 +2690,8 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
       // Cache'e kaydet
       webCache.set(searchQuery, { results, timestamp: Date.now() });
 
-      const formatted = formatWebResults(results);
-      return formatted || 'Güncel bilgi kaynağına şu anda erişemiyorum.';
+      const synthesized = synthesizeWebResponse(original, results);
+      return synthesized || 'Güncel bilgi kaynağına şu anda erişemiyorum.';
     }
   
     /* ============== SELF TESTLER (r6 genişletilmiş) ============== */
@@ -2501,7 +2763,8 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
 
         // === HATA 6: Yanlış dil ===
         ['Java calculator not Python', !generate('Java ile hesap makinesi yap', []).includes('def ')],
-        ['Java calculator honest fallback', generate('Java ile hesap makinesi yap', []).includes('göstermeyeceğim')],
+        ['Java calculator not JavaScript', !generate('Java ile hesap makinesi yap', []).includes('console.log')],
+        ['Java calculator produces Java', generate('Java ile hesap makinesi yap', []).includes('public class')],
 
         // === HATA 7: React JSX ===
         ['React login is JSX', generate('React ile giriş ekranı yap', []).includes('jsx')],
@@ -2573,6 +2836,41 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
         ['Beginner no-code variables teaches', generate('Python öğrenmeye yeni başladım. Bana değişkenleri çok basit şekilde öğret. Kod yazma.', []).includes('Değişken')],
         ['Multi-topic variables first', generate('Python öğreniyorum. Önce değişkenleri öğret, sonra listelere geçeriz.', []).includes('Değişken')],
         ['Minecraft plan', generate("Minecraft'ta korku oyunu yapmak istiyorum, nereden başlamalıyım?", []).includes('Platformu seç')],
+
+        // === r6 DÜZELTMELER: Dil algılama ===
+        ['java script → javascript', detectCodeLang('java script ile bir liste hazırla') === 'javascript'],
+        ['javascript → javascript', detectCodeLang('javascript ile bir liste hazırla') === 'javascript'],
+        ['java → java', detectCodeLang('java ile bir program yap') === 'java'],
+        ['js → javascript', detectLanguageHint('js ile bir fonksiyon yaz') === 'javascript'],
+        ['java script not java', detectLanguageHint('java script ile bir liste hazırla') !== 'java'],
+
+        // === r6 DÜZELTMELER: Web yönlendirme ===
+        ['Python son sürüm web adayı', needsWebSearch('Python\'un en son sürümü nedir?', analyzeCodeRequest('Python\'un en son sürümü nedir?')) === true],
+        ['Kuantum web adayı', needsWebSearch('Kuantum dolanıklığı nedir?', analyzeCodeRequest('Kuantum dolanıklığı nedir?')) === true],
+        ['Python nedir not web', needsWebSearch('Python nedir?', analyzeCodeRequest('Python nedir?')) === false],
+        ['Python son sürüm not local def', !generate('Python\'un en son sürümü nedir?', []).includes('genel amaçlı')],
+        ['Node son sürüm web adayı', needsWebSearch('Node.js\'in en son sürümü', analyzeCodeRequest('Node.js\'in en son sürümü')) === true],
+        ['React güncel sürüm web adayı', needsWebSearch('React\'in güncel sürümü', analyzeCodeRequest('React\'in güncel sürümü')) === true],
+
+        // === r6 DÜZELTMELER: Öneri/sayı/yıl algılama ===
+        ['2026 korku year', detectRecommendation("2026'da çıkan korku filmlerinden 5 tane söyle.").year === 2026],
+        ['2026 korku count', detectRecommendation("2026'da çıkan korku filmlerinden 5 tane söyle.").count === 5],
+        ['2026 korku category', detectRecommendation("2026'da çıkan korku filmlerinden 5 tane söyle.").category === 'movie'],
+        ['beş tane count', detectRecommendation('bana 5 tane komedi film söyle').count === 5],
+
+        // === r6 DÜZELTMELER: Java/Go kod üretimi ===
+        ['Java generic not JS', !generate('Java ile hava durumu uygulaması yap', []).includes('console.log')],
+        ['Java generic produces Java', generate('Java ile hava durumu uygulaması yap', []).includes('public class')],
+        ['Go generic not JS', !generate('Go ile basit liste hazırla', []).includes('console.log')],
+        ['Go generic produces Go', generate('Go ile basit liste hazırla', []).includes('package main')],
+        ['Go HTTP produces Go', generate('Go ile HTTP isteği yap', []).includes('package main')],
+        ['Go HTTP not JS', !generate('Go ile HTTP isteği yap', []).includes('console.log')],
+        ['Go Discord not JS', !generate('Go ile Discord botu yap', []).includes('console.log')],
+        ['Go Discord produces Go', generate('Go ile Discord botu yap', []).includes('package main')],
+
+        // === r6 DÜZELTMELER: MODEL metadata ===
+        ['MODEL version', Engine.MODEL.version === BUILD_VERSION],
+        ['MODEL name', Engine.MODEL.name === MODEL_NAME],
       ];
       const results = checks.map(([name, passed]) => ({ name, passed }));
       return {
@@ -2586,9 +2884,17 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
     /* ============== ENGINE ============== */
   
     const Engine = {
+      MODEL: {
+        name: MODEL_NAME,
+        icon: MODEL_ICON,
+        version: BUILD_VERSION,
+        thinkingMs: [700, 1500],
+        style: 'hızlı ve dengeli'
+      },
       generate,
       generateAsync,
       runSelfTests,
+      normalizeLang,
       detectQuestionType,
       isCodeGenerationRequest,
       detectCodeLang,
@@ -2607,7 +2913,10 @@ Hangisinden başlamak istersin? "Değişkenleri öğret" yazman yeterli.`;
       setWebProvider,
       needsWebSearch,
       buildSearchQuery,
+      normalizeWebResults,
+      synthesizeWebResponse,
       webCache,
+      isKnownLocalTopic,
       detectAdviceCategory: (text) => {
         const recommendation = detectRecommendation(text);
         const legacyNames = {

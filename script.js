@@ -38,7 +38,7 @@
       engine: 'BilalAIFlashLite'
     },
     flash: {
-      name: 'BilalAI - Flash 1.1',
+      name: 'BilalAI - Flash 1.2',
       shortName: 'Flash',
       icon: '⚡',
       color: '#00BFFF',
