@@ -843,39 +843,32 @@ function analyzeCodeRequest(text) {
   const task = detectSpecificCodeTask(text);
   let technology = null;
 
-  if (task === 'discord_bot') {
-    technology = hasAny(normalized, ['discord.js']) ? 'discord.js' : 'discord.py';
-  } else if (hasAny(normalized, ['react', 'jsx'])) {
-    technology = 'react';
-  } else if (hasAny(normalized, ['html', 'css', 'tailwind'])) {
-    technology = 'html/css';
-  } else if (hasAny(normalized, ['django'])) {
-    technology = 'django';
-  } else if (hasAny(normalized, ['flask'])) {
-    technology = 'flask';
-  } else if (hasAny(normalized, ['node', 'express'])) {
-    technology = 'node.js';
-  } else if (hasAny(normalized, ['sql', 'postgres', 'mysql'])) {
-    technology = 'sql';
+if (task === 'discord_bot') {
+  if (language === 'python') {
+    return codeFence('python', `# Kurulum: pip install -U discord.py
+
+import os
+import discord
+from discord.ext import commands
+
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+@bot.event
+async def on_ready():
+    print(f"{bot.user} olarak giriş yapıldı.")
+
+@bot.command()
+async def merhaba(ctx):
+    await ctx.send(f"Merhaba {ctx.author.mention}!")
+
+token = os.getenv("DISCORD_TOKEN")
+if not token:
+    raise RuntimeError("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
+
+bot.run(token)`);
   }
-
-  return {
-    language,
-    technology,
-    intent: wantsCode ? 'code_generation' : isExplanationRequest(text) ? 'explanation' : null,
-    task,
-    complexity: language ? detectCodeComplexity(text) : null,
-    wantsCode,
-    wantsExplanation: isExplanationRequest(text),
-    userLevel: detectUserLevel(text),
-    constraints: {
-      noCode: hasNoCodeConstraint(text)
-    }
-  };
-}
-
-function codeFence(language, code) {
-  return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
 }
 
 /* ===== HATA 6: Görev başına desteklenen diller ===== */
