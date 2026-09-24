@@ -843,6 +843,24 @@ function analyzeCodeRequest(text) {
   const task = detectSpecificCodeTask(text);
   let technology = null;
 
+  return {
+    language,
+    technology,
+    intent: wantsCode ? 'code_generation' : isExplanationRequest(text) ? 'explanation' : null,
+    task,
+    complexity: language ? detectCodeComplexity(text) : null,
+    wantsCode,
+    wantsExplanation: isExplanationRequest(text),
+    userLevel: detectUserLevel(text),
+    constraints: {
+      noCode: hasNoCodeConstraint(text)
+    }
+  };
+}
+
+/* Korunan eski Discord üretim bloğu: daha önce analyzeCodeRequest içine
+   yanlışlıkla yerleştirilmişti. İçeriği silinmeden ayrı yardımcıya alındı. */
+function legacyDiscordCodeGenerator(language, task) {
 if (task === 'discord_bot') {
   if (language === 'python') {
     return codeFence('python', `# Kurulum: pip install -U discord.py
@@ -953,6 +971,7 @@ func main() {
 
   return unsupportedLanguageResponse('discord_bot', language);
 }
+}
 
 /* ===== HATA 6: Görev başına desteklenen diller ===== */
 const SUPPORTED_CODE_TASKS = Object.freeze({
@@ -1009,6 +1028,11 @@ function unsupportedLanguageResponse(task, language) {
   return `**${langLabel}** için **${taskLabel}** görevinde hazır kod üreticim yok. ` +
     `Başka bir dilin kodunu ${langLabel} diye göstermeyeceğim.` +
     (supported.length ? ` Bu görev için desteklediğim diller: ${supportedLabels}.` : '');
+}
+
+function codeFence(language, code) {
+  const safeLanguage = textOf(language).trim();
+  return `\`\`\`${safeLanguage}\n${textOf(code).trim()}\n\`\`\``;
 }
 
 function simpleCodeSample(language, task) {
@@ -1068,10 +1092,9 @@ function generatedCode(language, task, requestText) {
     return unsupportedLanguageResponse(task, language);
   }
 
-  if (task === 'discord_bot') {
-    if (language === 'python') {
-      return codeFence('python', `# Kurulum: pip install -U discord.py
-bot.run(token)`);
+if (task === 'discord_bot') {
+  if (language === 'python') {
+    return codeFence('python', `# Kurulum: pip install -U discord.py
 
 import os
 import discord
@@ -1087,80 +1110,97 @@ async def on_ready():
 
 @bot.command()
 async def merhaba(ctx):
-await ctx.send(f"Merhaba {ctx.author.mention}!")
+    await ctx.send(f"Merhaba {ctx.author.mention}!")
 
 token = os.getenv("DISCORD_TOKEN")
 if not token:
-raise RuntimeError("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
+    raise RuntimeError("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
 
 bot.run(token)`);
-        }
-        if (language === 'javascript') {
-          return codeFence('javascript', `// Kurulum: npm install discord.js
+  }
+
+  if (language === 'javascript') {
+    return codeFence('javascript', `// Kurulum: npm install discord.js
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const client = new Client({
-intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages,
-GatewayIntentBits.MessageContent]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
-client.once("ready", () => console.log(\`${client.user.tag} hazır.\`));
+client.once("ready", () => {
+  console.log(\`${client.user.tag} hazır.\`);
+});
+
 client.on("messageCreate", (message) => {
-if (message.author.bot) return;
-if (message.content === "!merhaba") message.reply(\`Merhaba ${message.author}!\`);
+  if (message.author.bot) return;
+
+  if (message.content === "!merhaba") {
+    message.reply(\`Merhaba ${message.author}!\`);
+  }
 });
 
-if (!process.env.DISCORD_TOKEN) throw new Error("DISCORD_TOKEN eksik.");
+if (!process.env.DISCORD_TOKEN) {
+  throw new Error("DISCORD_TOKEN eksik.");
+}
+
 client.login(process.env.DISCORD_TOKEN);`);
-        }
-        if (language === 'go') {
-          return codeFence('go', `// Kurulum: go get github.com/bwmarrin/discordgo
+  }
+
+  if (language === 'go') {
+    return codeFence('go', `// Kurulum: go get github.com/bwmarrin/discordgo
+
 package main
 
 import (
-"fmt"
-"log"
-"os"
+    "fmt"
+    "log"
+    "os"
 
-"github.com/bwmarrin/discordgo"
-
+    "github.com/bwmarrin/discordgo"
 )
 
 func main() {
-token := os.Getenv("DISCORD_TOKEN")
-if token == "" {
-log.Fatal("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
-}
-
-dg, err := discordgo.New("Bot " + token)
-if err != nil {
-    log.Fatal("Bot oluşturulamadı:", err)
-}
-
-dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-    if m.Author.Bot {
-        return
+    token := os.Getenv("DISCORD_TOKEN")
+    if token == "" {
+        log.Fatal("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
     }
-    if m.Content == "!merhaba" {
-        s.ChannelMessageSend(m.ChannelID, "Merhaba!")
+
+    dg, err := discordgo.New("Bot " + token)
+    if err != nil {
+        log.Fatal("Bot oluşturulamadı:", err)
     }
-})
 
-dg.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentGuildMessages
+    dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+        if m.Author.Bot {
+            return
+        }
 
-if err := dg.Open(); err != nil {
-    log.Fatal("Bağlantı açılamadı:", err)
-}
-defer dg.Close()
+        if m.Content == "!merhaba" {
+            _, _ = s.ChannelMessageSend(m.ChannelID, "Merhaba!")
+        }
+    })
 
-fmt.Println("Bot çalışıyor. Ctrl+C ile durdur.")
-select {}
+    dg.Identify.Intents =
+        discordgo.IntentsGuilds |
+        discordgo.IntentGuildMessages |
+        discordgo.IntentMessageContent
 
-}`);
-}
-// Desteklenmeyen Discord bot dili
-return unsupportedLanguageResponse('discord_bot', language);
-}
+    if err := dg.Open(); err != nil {
+        log.Fatal("Bağlantı açılamadı:", err)
+    }
+    defer dg.Close()
+
+    fmt.Println("Bot çalışıyor. Ctrl+C ile durdur.")
+    select {}
+`);
+  }
+
+  return unsupportedLanguageResponse('discord_bot', language);
+  }
 
   if (task === 'calculator') {
     if (js) {
@@ -2005,20 +2045,20 @@ Bot dosyasını kaydet: Kodu \`bot.py\` gibi bir dosyaya kaydet.
 
 DISCORD_TOKEN ayarla: Ortam değişkeni olarak \`export DISCORD_TOKEN=token_metnin\` (Windows: \`set DISCORD_TOKEN=...\`).
 
-Çalıştır: Terminalde ```python bot.py``` (bazı sistemlerde `python3 bot.py`).
+Çalıştır: Terminalde \`\`\`python bot.py\`\`\` (bazı sistemlerde \`python3 bot.py\`).
 
 Çevrimiçi kontrol et: Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.`;
    }
    if (lang === 'javascript') {
      return `## JavaScript Discord botunu çalıştırma adımları
 
-discord.js kur: Terminalde ```npm install discord.js``` çalıştır.
+discord.js kur: Terminalde \`\`\`npm install discord.js\`\`\` çalıştır.
 
-Bot dosyasını kaydet: Kodu ```bot.js``` gibi bir dosyaya kaydet.
+Bot dosyasını kaydet: Kodu \`\`\`bot.js\`\`\` gibi bir dosyaya kaydet.
 
-DISCORD_TOKEN ayarla: Ortam değişkeni olarak `export DISCORD_TOKEN=token_metnin` (Windows: `set DISCORD_TOKEN=...`).
+DISCORD_TOKEN ayarla: Ortam değişkeni olarak \`export DISCORD_TOKEN=token_metnin\` (Windows: \`set DISCORD_TOKEN=...\`).
 
-Çalıştır: Terminalde ```node bot.js```.
+Çalıştır: Terminalde \`\`\`node bot.js\`\`\`.
 
 Çevrimiçi kontrol et: Bot Discord'da çevrimiçi görünmelidir. Görünmüyorsa token ve intent ayarlarını kontrol et.`;
 }
@@ -2029,11 +2069,11 @@ if (state.task === 'guess_game' &&
 hasAny(text, ['nasıl', 'çalıştır', 'çalıştıracağım'])) {
 return `Python'daki sayı tahmin oyunu için çalıştırma adımları:
 
-Kodu ```tahmin.py``` gibi bir dosyaya kaydet.
+Kodu \`\`\`tahmin.py\`\`\` gibi bir dosyaya kaydet.
 
 Terminali dosyanın bulunduğu klasörde aç.
 
-```python tahmin.py``` komutunu çalıştır. Bazı sistemlerde `python3 tahmin.py` olabilir.
+\`\`\`python tahmin.py\`\`\` komutunu çalıştır. Bazı sistemlerde \`python3 tahmin.py\` olabilir.
 
 Programın istediği tahmini yazıp Enter'a bas.`;
 }
@@ -3069,3 +3109,4 @@ const Engine = {
 
 if (typeof window !== 'undefined') window.BilalAIResponseEngine = Engine;
 if (typeof module !== 'undefined' && module.exports) module.exports = Engine
+})();
