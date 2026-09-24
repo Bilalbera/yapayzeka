@@ -869,6 +869,89 @@ if not token:
 
 bot.run(token)`);
   }
+
+  if (language === 'javascript') {
+    return codeFence('javascript', `// Kurulum: npm install discord.js
+
+const { Client, GatewayIntentBits } = require("discord.js");
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+client.once("ready", () => {
+  console.log(\`${client.user.tag} hazır.\`);
+});
+
+client.on("messageCreate", (message) => {
+  if (message.author.bot) return;
+
+  if (message.content === "!merhaba") {
+    message.reply(\`Merhaba ${message.author}!\`);
+  }
+});
+
+if (!process.env.DISCORD_TOKEN) {
+  throw new Error("DISCORD_TOKEN eksik.");
+}
+
+client.login(process.env.DISCORD_TOKEN);`);
+  }
+
+  if (language === 'go') {
+    return codeFence('go', `// Kurulum: go get github.com/bwmarrin/discordgo
+
+package main
+
+import (
+    "fmt"
+    "log"
+    "os"
+
+    "github.com/bwmarrin/discordgo"
+)
+
+func main() {
+    token := os.Getenv("DISCORD_TOKEN")
+    if token == "" {
+        log.Fatal("DISCORD_TOKEN ortam değişkeni tanımlı değil.")
+    }
+
+    dg, err := discordgo.New("Bot " + token)
+    if err != nil {
+        log.Fatal("Bot oluşturulamadı:", err)
+    }
+
+    dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+        if m.Author.Bot {
+            return
+        }
+
+        if m.Content == "!merhaba" {
+            _, _ = s.ChannelMessageSend(m.ChannelID, "Merhaba!")
+        }
+    })
+
+    dg.Identify.Intents =
+        discordgo.IntentsGuilds |
+        discordgo.IntentGuildMessages |
+        discordgo.IntentMessageContent
+
+    if err := dg.Open(); err != nil {
+        log.Fatal("Bağlantı açılamadı:", err)
+    }
+    defer dg.Close()
+
+    fmt.Println("Bot çalışıyor. Ctrl+C ile durdur.")
+    select {}
+}`);
+  }
+
+  return unsupportedLanguageResponse('discord_bot', language);
 }
 
 /* ===== HATA 6: Görev başına desteklenen diller ===== */
