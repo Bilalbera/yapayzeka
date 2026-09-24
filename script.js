@@ -922,7 +922,7 @@ flash: {
     // Fallback: motor yoksa basit yanıt
     const m = meta;
     return [
-       ${m.icon || '⚡'} Anladım!` **"${truncate(userMsg, 90)}"** hakkında konuşuyoruz.\n\n`,
+      `${m.icon || '⚡'} Anladım! **"${truncate(userMsg, 90)}"** hakkında konuşuyoruz.\n\n`,
       `Konuyu daha derin inceleyebilmem için birkaç detay paylaşabilir misin?\n`,
       `- Ne **tür** bir sonuç beklüyorsun?\n`,
       `- Hangi **ortam / teknoloji** ile çalışıyoruz?\n`,
@@ -1405,6 +1405,11 @@ setTimeout(async () => {
     appendMessageEl(aiMsg);
   }
 }, delay);
+
+    /* Eski/tekrarlanan async yanıt bloğu — içerik korunmuştur;
+       mevcut try/catch bloğuyla aynı işi yaptığı için yorum içinde tutulur.
+       Böylece dosyanın geri kalan yapısı bozulmaz. */
+    /*
         id: uid(),
         role: 'assistant',
         content: reply,
@@ -1417,6 +1422,7 @@ setTimeout(async () => {
       saveChats();
       appendMessageEl(aiMsg);
     }, delay);
+  } */
   }
 
   /* ========== Textarea otomatik boyut ========== */
