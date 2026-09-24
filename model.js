@@ -162,8 +162,9 @@ function detectQuestionType(text) {
 
   if (hasAny(t, [
     'nedir', 'ne demek', 'ne anlama gelir', 'ne işe yarar',
-    'ne oluyor', 'ne olduğunu', 'ne yapıyor', 'ne yapar',
-    'neleri kapsar', 'hakkında bilgi'
+    'ne için kullanılır', 'nerede kullanılır', 'kullanım alanları',
+    'hangi alanlarda kullanılır', 'ne oluyor', 'ne olduğunu',
+    'ne yapıyor', 'ne yapar', 'neleri kapsar', 'hakkında bilgi'
   ])) return INTENTS.WHAT;
 
   // Soru işareti tek başına WHAT değildir.
@@ -595,10 +596,29 @@ function resolveWithContext(userMsg, context) {
     return { resolved: original, topic: null, followUp: false };
   }
 
-  const recent = context.slice(-12).reverse();
-  const previousUser = recent.find((item) =>
+  // Bazı arayüzler generate() çağrısı yapılmadan önce mevcut kullanıcı mesajını
+  // context'e ekler. Önce onu çıkar; aksi halde model yeni mesajı "önceki konu"
+  // sanarak kendi kendine bağlam kurar. Aynı mesaj daha önce gerçekten geçmişte
+  // kullanılmışsa sonraki kopya korunur.
+  const recent = context.slice(-12);
+  if (recent.length &&
+    recent[recent.length - 1] &&
+    recent[recent.length - 1].role === 'user' &&
+    norm(recent[recent.length - 1].content) === norm(original)) {
+    recent.pop();
+  }
+  recent.reverse();
+
+  const substantiveUsers = recent.filter((item) =>
     item && item.role === 'user' && isSubstantiveUserMessage(item.content)
   );
+
+  // Önceki konuşmada gerçek bir konu mesajı varsa follow-up mesajlarını atla.
+  // Ama context yalnızca tek bir öğretme/konu mesajından oluşuyorsa onu koru;
+  // böylece model kendi kendine "current message" filtresinden dolayı konuyu kaybetmez.
+  const previousUser = substantiveUsers.find((item) =>
+    !isContextualFollowUp(item.content)
+  ) || substantiveUsers[0];
   if (!previousUser) {
     return { resolved: original, topic: null, followUp: true };
   }
@@ -1749,7 +1769,19 @@ function detectFormatRequestSimple(text) {
 }
 
 function detectFormatRequest(text) {
-  return detectFormatRequestSimple(text);
+  const t = norm(text);
+  if (hasAny(t, [
+    'günlük hayattan', 'günlük hayattan örnek', 'günlük örnek',
+    'günlük yaşamdan', 'önce günlük', 'günlük hayattan bir örnek',
+    'günlük hayattan bir örnekle'
+  ])) return 'daily_life_example';
+  if (hasAny(t, ['benzer bir örnekle', 'analoji', 'metaforla', 'kıyasla'])) {
+    return 'analogy';
+  }
+  if (hasAny(t, ['gerçek bir örnek', 'gerçek örnek', 'gerçek hayattan'])) {
+    return 'real_example';
+  }
+  return null;
 }
 
 /* HATA 2: Dil bağımsız topic + dil bağımlı anlatım */
@@ -1860,21 +1892,40 @@ function setKnowledgeProvider(provider) {
     : { answer: () => null };
 }
 
-function knownKnowledgeResponse(text, type) {
+function knownKnowledgeResponse(text, type, topic) {
+  const normalizedText = norm(text);
+  const normalizedTopic = norm(topic);
+
   // Güncellik sinyali varsa yerel bilgi tabanı yetersizdir
-  if (hasAny(norm(text), FRESHNESS_SIGNALS)) return null;
+  if (hasAny(normalizedText, FRESHNESS_SIGNALS)) return null;
+
   for (const [key, answer] of Object.entries(KNOWN_KNOWLEDGE)) {
     const matchesKey = hasAny(text, [key]) ||
-      (key === 'python' && /\bpython\w*\b/iu.test(norm(text)));
-    if (matchesKey) {
-      if (type === INTENTS.HOW && key === 'python') {
-        return `**Python kullanmaya başlamak için:** Python'u kur, bir \`.py\` dosyası oluştur, \`print("Merhaba")\` gibi küçük bir kod çalıştır ve ardından değişken, koşul, döngü ve fonksiyonlarla ilerle.`;
-      }
-      if (type === INTENTS.WHAT || type === INTENTS.HOW) return answer;
+      (key === 'python' && /\bpython\w*\b/iu.test(normalizedText)) ||
+      (normalizedTopic && normalizedTopic === key);
+
+    if (!matchesKey) continue;
+
+    // Context üzerinden gelen "Peki ne için kullanılır?" gibi sorularda
+    // konu mesajın içinde tekrar geçmeyebilir. Python için kullanım alanını
+    // doğrudan cevapla; genel tanımı tekrarlama.
+    if (key === 'python' &&
+      hasAny(normalizedText, [
+        'ne için kullanılır', 'ne işe yarar', 'nerede kullanılır',
+        'kullanım alanları', 'hangi alanlarda kullanılır'
+      ])) {
+      return '**Python**; web geliştirme, otomasyon, veri analizi, yapay zekâ, bilimsel hesaplama ve masaüstü uygulamaları gibi birçok alanda kullanılır. Ayrıca başlangıç seviyesinde öğrenmesi görece kolay olduğu için eğitimde de sık tercih edilir.';
     }
+
+    if (type === INTENTS.HOW && key === 'python') {
+      return `**Python kullanmaya başlamak için:** Python'u kur, bir \.py dosyası oluştur, \`print("Merhaba")\` gibi küçük bir kod çalıştır ve ardından değişken, koşul, döngü ve fonksiyonlarla ilerle.`;
+    }
+
+    if (type === INTENTS.WHAT || type === INTENTS.HOW) return answer;
   }
   return null;
 }
+
 
 function unknownKnowledgeResponse(topic, type, conversationState) {
   const contextualLabel = conversationState?.topic && conversationState?.subtopic
@@ -1897,7 +1948,7 @@ function questionResponse(text, topic, type, context, conversationState) {
       text, conversationState);
     if (teachingResult) return teachingResult;
   }
-  const known = knownKnowledgeResponse(text, type);
+  const known = knownKnowledgeResponse(text, type, topic);
   if (known) return known;
   // Güncellik sinyali varsa web yönlendirmesi
   if (hasAny(norm(text), FRESHNESS_SIGNALS)) {
@@ -1992,9 +2043,43 @@ Başlangıç için sıra: Önce Python temellerini öğren, ardından Discord bo
     hasAny(text, ['nedir', 'ne demek', 'ne anlama gelir', 'hakkında bilgi']));
 
   if (isPureGenericQuestion) {
-    const known = knownKnowledgeResponse(text, INTENTS.WHAT) ||
-      knownKnowledgeResponse(text, INTENTS.HOW);
+    const known = knownKnowledgeResponse(text, INTENTS.WHAT, conversationState?.topic || topic) ||
+      knownKnowledgeResponse(text, INTENTS.HOW, conversationState?.topic || topic);
     if (known) return `${known}\n\nİstersen bunu kod göstermeden kavramsal adımlara da ayırabilirim.`;
+  }
+
+  // Genel bağlam takibi: Python ile başlayan konuşmalarda
+  // "Günlük hayattan bir örnek ver" ve "Biraz daha basit anlat" gibi
+  // kısa takip mesajlarını mevcut konudan koparmadan cevapla.
+  const contextTopic = norm(conversationState?.topic || topic);
+  const followUpAction = conversationState?.followUpAction;
+  const formatRequest = conversationState?.formatRequest;
+
+  if (contextTopic === 'python') {
+    if (formatRequest === 'daily_life_example') {
+      return `## Python — günlük hayattan örnek
+
+Bir **otomat** düşündüğünü varsay. Para atıyorsun, bir ürün seçiyorsun; otomat da seçimine göre farklı bir işlem yapıyor. Python ile de benzer şekilde bilgisayara adım adım ne yapacağını söyleyebilirsin.
+
+Örneğin markette her gün yaptığın işleri otomatikleştirmek gibi düşünebilirsin: bir dosyadaki isimleri okuyup düzenlemek, hesap yapmak veya tekrar eden işleri senin yerine yapmak.
+
+Kısacası: **Python, bilgisayara tekrar tekrar yapacağın işleri tarif edip otomatikleştirmene yardımcı olan bir araçtır.**`;
+    }
+
+    if (followUpAction === 'simplify') {
+      return `## Python — daha basit anlatım
+
+Python'u bilgisayara vereceğin **talimatlar listesi** gibi düşünebilirsin. Sen ne yapılacağını yazarsın, Python da bu talimatları sırayla çalıştırır.
+
+Mesela:
+
+- Hesap yapabilir.
+- Dosyaları düzenleyebilir.
+- Web sitesi veya uygulama geliştirmeye yardımcı olabilir.
+- Yapay zekâ ve veri işlemede kullanılabilir.
+
+**Kısaca: Python = bilgisayara iş yaptırmak için kullandığın bir programlama dili.**`;
+    }
   }
 
   const label = conversationState?.topic || topic;
