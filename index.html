@@ -1176,7 +1176,7 @@ window.addEventListener('unhandledrejection', function(e){ console.error('🔥 U
 <script>
 window.__BilalAIProReady = (async function(){
   try {
-    const mod = await import('./promodel.js?v=20260925r2');
+    const mod = await import('./promodel.js?v=20260925r3');
     const pro = mod.default || mod.BilalAIPro || window.BilalAIPro;
     if (!pro) return false;
 
@@ -1236,17 +1236,78 @@ window.__BilalAIProReady = (async function(){
         return false;
       };
 
+      let lastPlanResult = null;
+
+      const taskListFrom = (value) => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value !== 'object') return [];
+        if (Array.isArray(value.tasks)) return value.tasks;
+        if (Array.isArray(value.steps)) return value.steps;
+        if (value.plan && typeof value.plan === 'object') {
+          if (Array.isArray(value.plan.tasks)) return value.plan.tasks;
+          if (Array.isArray(value.plan.steps)) return value.plan.steps;
+        }
+        return [];
+      };
+
+      const knownTasks = () => {
+        const out = [];
+        const push = (items) => {
+          for (const item of items || []) {
+            if (!item) continue;
+            if (typeof item === 'string') out.push({ id:item, raw:item });
+            else if (typeof item === 'object') {
+              const id = item.id || item.taskId || item.key || item.task_id;
+              if (id) out.push({ id:String(id), raw:item });
+            }
+          }
+        };
+        push(taskListFrom(lastPlanResult));
+        try {
+          if (typeof pro.getTasks === 'function') push(pro.getTasks());
+        } catch (_) {}
+        try {
+          const state = typeof pro.getState === 'function' ? pro.getState() : null;
+          push(taskListFrom(state));
+        } catch (_) {}
+        const seen = new Set();
+        return out.filter(x => { if (seen.has(x.id)) return false; seen.add(x.id); return true; });
+      };
+
+      const resolveTaskArgument = (args) => {
+        const first = args[0];
+        const known = knownTasks();
+
+        if (first && typeof first === 'object') {
+          const id = first.id || first.taskId || first.task_id || first.key;
+          if (id && known.some(t => t.id === String(id))) return [String(id)];
+          const nested = taskListFrom(first);
+          if (nested.length) {
+            const nestedId = nested[0]?.id || nested[0]?.taskId || nested[0]?.task_id || nested[0]?.key;
+            if (nestedId) return [String(nestedId)];
+          }
+        }
+
+        if (typeof first === 'string' && known.some(t => t.id === first)) return [first];
+
+        // Pro 1.1 runTask(taskId) bekliyorsa, script'in yanlışlıkla plan
+        // nesnesini/request metnini vermesi durumunda ilk gerçek task ID'sini kullan.
+        if (known.length) return [known[0].id];
+        return args;
+      };
+
       pro.plan = async function(...args) {
         const candidate = normalizeRequest(args[0]) || latestUserRequest();
         if (candidate) lastPlannedSignature = candidate;
-        return await originalPlan(...args);
+        lastPlanResult = await originalPlan(...args);
+        return lastPlanResult;
       };
 
       pro.runTask = async function(...args) {
         const request = normalizeRequest(args[0]) || latestUserRequest();
         const signature = request;
 
-        // Yeni bir kullanıcı isteği geldiyse eski planı körlemesine çalıştırma.
         if (signature && signature !== lastPlannedSignature) {
           await pro.plan(request);
         } else if (!hasUsablePlan()) {
@@ -1256,7 +1317,20 @@ window.__BilalAIProReady = (async function(){
           await pro.plan(request);
         }
 
-        return await originalRunTask(...args);
+        const resolvedArgs = resolveTaskArgument(args);
+        try {
+          return await originalRunTask(...resolvedArgs);
+        } catch (error) {
+          // Task ID eşleşmediyse, plan içindeki ilk gerçek task ID'siyle bir kez daha dene.
+          if (error && /Task not found/i.test(String(error.message || error))) {
+            const fallback = knownTasks()[0];
+            if (fallback && fallback.id &&
+                (!resolvedArgs.length || resolvedArgs[0] !== fallback.id)) {
+              return await originalRunTask(fallback.id);
+            }
+          }
+          throw error;
+        }
       };
 
       Object.defineProperty(pro, '__bilalaiExecutionGuardInstalled', {
@@ -1276,7 +1350,7 @@ window.__BilalAIProReady = (async function(){
 window.__BilalAIScriptReady = (async function(){
   await (window.__BilalAIProReady || Promise.resolve(false));
   const script = document.createElement('script');
-  script.src = './script.js?v=20260925r7';
+  script.src = './script.js?v=20260925r8';
   document.body.appendChild(script);
   return new Promise((resolve, reject) => {
     script.addEventListener('load', () => resolve(true), {once:true});
