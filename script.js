@@ -26,27 +26,38 @@
   /* ========== Kurucu Parolası ========== */
   const FOUNDER_PASSWORD = 'BilalAI_2026';
 
-  /* ========== Modeller ========== */
-  const MODELS = {
-    flashlite: {
-      name: 'BilalAI - FlashLite - 1.0',
-      shortName: 'FlashLite',
-      icon: '⚡',
-      color: '#F59E0B',
-      thinkingMs: [500, 1000],
-      style: 'ultra hızlı, kısa cevaplar',
-      engine: 'BilalAIFlashLite'
-    },
-flash: {
-  name: 'BilalAI - Flash 1.2',
-  shortName: 'Flash 1.2',
-  icon: '⚡',
-  color: '#00BFFF',
-  thinkingMs: [700, 1500],
-  style: 'hızlı ve dengeli',
-  engine: 'BilalAIResponseEngine'
-}
-  };
+/* ========== Modeller ========== */
+const MODELS = {
+  flashlite: {
+    name: 'BilalAI - FlashLite - 1.0',
+    shortName: 'FlashLite',
+    icon: '⚡',
+    color: '#F59E0B',
+    thinkingMs: [500, 1000],
+    style: 'ultra hızlı, kısa cevaplar',
+    engine: 'BilalAIFlashLite'
+  },
+
+  flash: {
+    name: 'BilalAI - Flash 1.2',
+    shortName: 'Flash 1.2',
+    icon: '⚡',
+    color: '#00BFFF',
+    thinkingMs: [700, 1500],
+    style: 'hızlı ve dengeli',
+    engine: 'BilalAIResponseEngine'
+  },
+
+  pro: {
+    name: 'BilalAI - Pro 1.0',
+    shortName: 'Pro 1.0',
+    icon: '🧠',
+    color: '#8B5CF6',
+    thinkingMs: [1200, 2400],
+    style: 'agentic coding, planlama, kodlama ve test',
+    engine: 'BilalAIPro'
+  }
+};
 
   /* ========== Beceri Haritası (JSON'dan alınan + temel) ========== */
   const DEFAULT_SKILLS = {
