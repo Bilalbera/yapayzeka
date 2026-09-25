@@ -1178,8 +1178,94 @@ window.__BilalAIProReady = (async function(){
   try {
     const mod = await import('./promodel.js?v=20260925r2');
     const pro = mod.default || mod.BilalAIPro || window.BilalAIPro;
-    if (pro) window.BilalAIPro = pro;
-    return !!window.BilalAIPro;
+    if (!pro) return false;
+
+    // Pro 1.1 çalışma sırası koruması:
+    // script.js bazı sürümlerde runTask() çağrısını plan() çağrısından önce
+    // yapabiliyor. Pro modeli bunun için açıkça hata veriyor: "No plan".
+    // Burada runTask öncesini güvenceye alıyoruz; mevcut Pro API'si değişmez.
+    if (!pro.__bilalaiExecutionGuardInstalled &&
+        typeof pro.runTask === 'function' && typeof pro.plan === 'function') {
+      const originalPlan = pro.plan.bind(pro);
+      const originalRunTask = pro.runTask.bind(pro);
+      let lastPlannedSignature = '';
+
+      const normalizeRequest = (value) => {
+        if (value == null) return '';
+        if (typeof value === 'string') return value.trim();
+        if (typeof value === 'object') {
+          for (const key of ['request', 'prompt', 'message', 'userMsg', 'description', 'text']) {
+            if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
+          }
+        }
+        return '';
+      };
+
+      const latestUserRequest = () => {
+        try {
+          const nodes = Array.from(document.querySelectorAll(
+            '.message-row.user .message-content, .message-row.user .message-body, .message-row.user .message-text'
+          ));
+          for (let i = nodes.length - 1; i >= 0; i--) {
+            const t = (nodes[i].innerText || nodes[i].textContent || '').trim();
+            if (t) return t;
+          }
+          const rows = Array.from(document.querySelectorAll('.message-row.user'));
+          for (let i = rows.length - 1; i >= 0; i--) {
+            const t = (rows[i].innerText || rows[i].textContent || '').trim();
+            if (t) return t;
+          }
+        } catch (_) {}
+        return '';
+      };
+
+      const hasUsablePlan = () => {
+        try {
+          const p = typeof pro.getPlan === 'function' ? pro.getPlan() : null;
+          if (p && typeof p === 'object') {
+            if (Array.isArray(p.tasks) && p.tasks.length) return true;
+            if (Array.isArray(p.steps) && p.steps.length) return true;
+            if (p.id || p.request || p.goal || p.plan) return true;
+          }
+          const st = typeof pro.getState === 'function' ? pro.getState() : null;
+          if (st && typeof st === 'object') {
+            if (st.plan || st.currentPlan) return true;
+            if (Array.isArray(st.tasks) && st.tasks.length) return true;
+          }
+        } catch (_) {}
+        return false;
+      };
+
+      pro.plan = async function(...args) {
+        const candidate = normalizeRequest(args[0]) || latestUserRequest();
+        if (candidate) lastPlannedSignature = candidate;
+        return await originalPlan(...args);
+      };
+
+      pro.runTask = async function(...args) {
+        const request = normalizeRequest(args[0]) || latestUserRequest();
+        const signature = request;
+
+        // Yeni bir kullanıcı isteği geldiyse eski planı körlemesine çalıştırma.
+        if (signature && signature !== lastPlannedSignature) {
+          await pro.plan(request);
+        } else if (!hasUsablePlan()) {
+          if (!request) {
+            throw new Error('Pro isteği bulunamadı; plan() için kullanıcı isteği gerekli.');
+          }
+          await pro.plan(request);
+        }
+
+        return await originalRunTask(...args);
+      };
+
+      Object.defineProperty(pro, '__bilalaiExecutionGuardInstalled', {
+        value: true, enumerable: false, configurable: false
+      });
+    }
+
+    window.BilalAIPro = pro;
+    return true;
   } catch (error) {
     console.error('❌ Pro module yüklenemedi:', error);
     return false;
