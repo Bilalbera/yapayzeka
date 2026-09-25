@@ -913,8 +913,61 @@ const MODELS = {
     }));
   }
 
-  /* ========== Yanıt Motoru (Entegrasyon: model.js + flashlitemodel.js) ========== */
-  function generateResponse(userMsg, modelKey, chat) {
+  /* ========== Model yönlendirme yardımcıları ========== */
+  function isProModel(modelKey) {
+    const meta = MODELS[modelKey];
+    return modelKey === 'pro' || (meta && meta.engine === 'BilalAIPro');
+  }
+
+  /* Pro 1.0 — bağımsız agent akışı.
+     Buradan ASLA BilalAIResponseEngine / BilalAIFlashLite çağrılmaz. */
+  async function runProAgent(userMsg) {
+    const Pro = window.BilalAIPro;
+    if (!Pro || typeof Pro.runTask !== 'function') {
+      return '⚠️ **Pro 1.0 motoru yüklenemedi** (`promodel.js`).\n\nPro modundayken Flash motoruna düşülmez; lütfen sayfayı yenileyip tekrar deneyin.';
+    }
+
+    const bridge = window.BilalAIProBridge || {};
+    const options = {};
+    if (bridge.workspace) options.workspace = bridge.workspace;
+    if (bridge.preview) options.preview = bridge.preview;
+
+    const result = await Pro.runTask(userMsg, options);
+
+    const out = ['🧠 **BilalAI - Pro 1.0** — agent akışı tamamlandı.', ''];
+    out.push(result.response || '');
+
+    if (result.filesDetailed && result.filesDetailed.length) {
+      out.push('', '### Workspace');
+      result.filesDetailed.forEach(f => {
+        out.push(`• \`${f.path}\` — ${f.status === 'updated' ? 'güncellendi' : 'oluşturuldu'} (workspace'e yazıldı)`);
+      });
+    }
+    if (result.fixAttempts || (result.state && result.state.fixAttempts)) {
+      const n = result.fixAttempts || result.state.fixAttempts;
+      if (n) out.push('', `🔧 Otomatik düzeltme denemesi: **${n}/3**`);
+    }
+    if (result.preview && result.preview.available) {
+      out.push('', '▶ Preview hazır — workspace panelindeki **Preview** sekmesinden açabilirsin.');
+    }
+    if (!result.ok || result.testStatus === 'failed') {
+      out.push('', '⚠️ Bazı doğrulamalar geçmedi; yukarıdaki hata listesine bak.');
+    }
+    return out.join('\n');
+  }
+
+  /* ========== Yanıt Motoru (Entegrasyon: flashmodel.js + flashlitemodel.js + promodel.js) ========== */
+  async function generateResponse(userMsg, modelKey, chat) {
+    // --- Pro 1.0: tamamen ayrı yol, fallback yok ---
+    if (isProModel(modelKey)) {
+      try {
+        return await runProAgent(userMsg);
+      } catch (e) {
+        console.error('[BilalAI Pro] agent hatası:', e);
+        return '⚠️ **Pro 1.0 görevi tamamlanamadı:** ' + (e && e.message ? e.message : 'bilinmeyen hata');
+      }
+    }
+
     const meta = MODELS[modelKey] || MODELS.flash;
     let Engine = null;
     if (meta && meta.engine === 'BilalAIFlashLite' && window.BilalAIFlashLite && typeof window.BilalAIFlashLite.generate === 'function') {
@@ -1324,16 +1377,15 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
     // Düşünme animasyonu
     const mm = MODELS[modelKey] || MODELS.flash;
     const [a, b] = mm.thinkingMs;
-    const delay = randInt(a, b);
+    // Pro kendi agent akışını yürütür; yapay bekleme eklemiyoruz.
+    const delay = isProModel(modelKey) ? 0 : randInt(a, b);
 
-    showThinking(modelKey);
-    setTimeout(() => {
+    const finish = (content) => {
       removeThinking();
-      const replyText = generateResponse(text, modelKey, chat);
       const aiMsg = {
         id: uid(),
         role: 'assistant',
-        content: replyText,
+        content: content,
         timestamp: new Date().toISOString(),
         feedback: null,
         model: modelKey
@@ -1342,6 +1394,17 @@ Rust örneği: kelime frekans sayacı. HashMap + borrow kurallarına uygun. İst
       chat.updatedAt = new Date().toISOString();
       saveChats();
       appendMessageEl(aiMsg);
+    };
+
+    showThinking(modelKey);
+    setTimeout(async () => {
+      try {
+        const replyText = await generateResponse(text, modelKey, chat);
+        finish(replyText);
+      } catch (e) {
+        console.error('[BilalAI] sendMessage HATASI:', e);
+        finish('⚠️ Yanıt oluşturulurken beklenmeyen bir hata oluştu.');
+      }
     }, delay);
   }
 
