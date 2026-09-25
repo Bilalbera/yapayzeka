@@ -4389,14 +4389,241 @@ try {
 
 window.__BilalAIProReady = (async function(){
   const url='./promodel.js?v=20260925r5';
+
   try {
     const response=await fetch(url,{cache:'no-store'});
-    if(!response.ok){ console.warn(`[BilalAI] Pro modülü bulunamadı (${response.status}). Flash kullanılabilir.`); return false; }
+    if(!response.ok){
+      console.warn(`[BilalAI] Pro modülü bulunamadı (${response.status}). Flash kullanılabilir.`);
+      return false;
+    }
+
     const mod=await import(url);
     const pro=mod.default||mod.BilalAIPro||window.BilalAIPro;
-    if(!pro){ console.warn('[BilalAI] promodel.js yüklendi fakat Pro nesnesi bulunamadı.'); return false; }
-    window.BilalAIPro=pro; return true;
-  } catch(error) { console.warn('[BilalAI] Pro modülü yüklenemedi; Flash kullanılabilir.',error); return false; }
+    if(!pro){
+      console.warn('[BilalAI] promodel.js yüklendi fakat Pro nesnesi bulunamadı.');
+      return false;
+    }
+
+    /* ==========================================================
+       PRO 1.1 ÇALIŞTIRMA UYUMLULUK KATMANI
+
+       script.js -> runProAgent() bazı sürümlerde doğrudan
+       pro.runTask(...) çağırıyor. Pro 1.1 ise önce plan()
+       oluşturulmasını şart koşuyor ve aksi halde:
+         "No plan — call plan() first."
+       hatası veriyor.
+
+       Bu katman runTask() çağrısını değiştirmeden korur:
+       - Önce normal runTask denenir.
+       - Yalnızca "No plan" hatasında plan() oluşturulur.
+       - Gerekirse gerçek task ID'si plan/getTasks/getState içinden çözülür.
+       - "Task not found" için bir kez ilk gerçek task ID'siyle
+         yeniden denenir.
+       - plan()/runTask() senkron veya Promise döndüren Pro sürümleri
+         desteklenir.
+    ========================================================== */
+    if(!pro.__bilalaiExecutionGuardInstalled &&
+       typeof pro.runTask==='function' && typeof pro.plan==='function'){
+
+      const originalPlan=pro.plan.bind(pro);
+      const originalRunTask=pro.runTask.bind(pro);
+
+      const isPromiseLike=(value)=>!!value && typeof value.then==='function';
+
+      const normalizeRequest=(value)=>{
+        if(value==null) return '';
+        if(typeof value==='string') return value.trim();
+        if(typeof value==='object'){
+          for(const key of ['request','prompt','message','userMsg','description','text']){
+            if(typeof value[key]==='string' && value[key].trim()) return value[key].trim();
+          }
+        }
+        return '';
+      };
+
+      const latestUserRequest=()=>{
+        try{
+          const selectors=[
+            '.message-row.user .message-content',
+            '.message-row.user .message-body',
+            '.message-row.user .message-text',
+            '.message-row.user'
+          ];
+          for(const selector of selectors){
+            const nodes=Array.from(document.querySelectorAll(selector));
+            for(let i=nodes.length-1;i>=0;i--){
+              const value=(nodes[i].innerText||nodes[i].textContent||'').trim();
+              if(value) return value;
+            }
+          }
+        }catch(_){}
+        return '';
+      };
+
+      const taskListFrom=(value)=>{
+        if(!value) return [];
+        if(Array.isArray(value)) return value;
+        if(typeof value!=='object') return [];
+        if(Array.isArray(value.tasks)) return value.tasks;
+        if(Array.isArray(value.steps)) return value.steps;
+        if(value.plan && typeof value.plan==='object'){
+          if(Array.isArray(value.plan.tasks)) return value.plan.tasks;
+          if(Array.isArray(value.plan.steps)) return value.plan.steps;
+        }
+        return [];
+      };
+
+      let lastPlanResult=null;
+
+      const knownTasks=()=>{
+        const out=[];
+        const push=(items)=>{
+          for(const item of items||[]){
+            if(!item) continue;
+            if(typeof item==='string') out.push({id:item,raw:item});
+            else if(typeof item==='object'){
+              const id=item.id||item.taskId||item.task_id||item.key;
+              if(id) out.push({id:String(id),raw:item});
+            }
+          }
+        };
+
+        push(taskListFrom(lastPlanResult));
+        try{ if(typeof pro.getTasks==='function') push(pro.getTasks()); }catch(_){}
+        try{
+          const state=typeof pro.getState==='function'?pro.getState():null;
+          push(taskListFrom(state));
+        }catch(_){}
+
+        const seen=new Set();
+        return out.filter(item=>{
+          if(seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+      };
+
+      const getUsablePlan=()=>{
+        try{
+          if(typeof pro.getPlan==='function'){
+            const plan=pro.getPlan();
+            if(plan && typeof plan==='object'){
+              if(Array.isArray(plan.tasks)&&plan.tasks.length) return true;
+              if(Array.isArray(plan.steps)&&plan.steps.length) return true;
+              if(plan.id||plan.request||plan.goal||plan.plan) return true;
+            }
+          }
+        }catch(_){}
+        try{
+          if(typeof pro.getState==='function'){
+            const state=pro.getState();
+            if(state && typeof state==='object' && (state.plan||state.currentPlan||Array.isArray(state.tasks)&&state.tasks.length)) return true;
+          }
+        }catch(_){}
+        return knownTasks().length>0;
+      };
+
+      const resolveTaskArgs=(args)=>{
+        const known=knownTasks();
+        if(!known.length) return args;
+
+        const first=args[0];
+        if(first && typeof first==='object'){
+          const id=first.id||first.taskId||first.task_id||first.key;
+          if(id && known.some(item=>item.id===String(id))) return [String(id)];
+          const nested=taskListFrom(first);
+          const nestedId=nested[0]?.id||nested[0]?.taskId||nested[0]?.task_id||nested[0]?.key;
+          if(nestedId) return [String(nestedId)];
+        }
+
+        if(typeof first==='string' && known.some(item=>item.id===first)) return [first];
+
+        return [known[0].id];
+      };
+
+      const runResolved=(args)=>{
+        const resolvedArgs=resolveTaskArgs(args);
+        try{
+          const result=originalRunTask(...resolvedArgs);
+          return result;
+        }catch(error){
+          if(/Task not found/i.test(String(error?.message||error))){
+            const fallback=knownTasks()[0];
+            if(fallback?.id && (!resolvedArgs.length || resolvedArgs[0]!==fallback.id)){
+              return originalRunTask(fallback.id);
+            }
+          }
+          throw error;
+        }
+      };
+
+      const recoverNoPlan=(args)=>{
+        const request=normalizeRequest(args[0]) || latestUserRequest();
+        if(!request) throw new Error('Pro isteği bulunamadı; plan() için kullanıcı isteği gerekli.');
+
+        let planResult=originalPlan(request);
+        const afterPlan=()=>{
+          const resolved=runResolved(args);
+          if(isPromiseLike(resolved)){
+            return resolved.catch(error=>{
+              if(/Task not found/i.test(String(error?.message||error))){
+                const fallback=knownTasks()[0];
+                if(fallback?.id) return originalRunTask(fallback.id);
+              }
+              throw error;
+            });
+          }
+          return resolved;
+        };
+
+        if(isPromiseLike(planResult)){
+          return planResult.then(result=>{ lastPlanResult=result; return afterPlan(); });
+        }
+
+        lastPlanResult=planResult;
+        return afterPlan();
+      };
+
+      pro.runTask=function(...args){
+        let result;
+        try{
+          result=originalRunTask(...resolveTaskArgs(args));
+        }catch(error){
+          if(/No plan/i.test(String(error?.message||error))) return recoverNoPlan(args);
+          if(/Task not found/i.test(String(error?.message||error))){
+            const fallback=knownTasks()[0];
+            if(fallback?.id) return originalRunTask(fallback.id);
+          }
+          throw error;
+        }
+
+        if(isPromiseLike(result)){
+          return result.catch(error=>{
+            if(/No plan/i.test(String(error?.message||error))) return recoverNoPlan(args);
+            if(/Task not found/i.test(String(error?.message||error))){
+              const fallback=knownTasks()[0];
+              if(fallback?.id) return originalRunTask(fallback.id);
+            }
+            throw error;
+          });
+        }
+
+        return result;
+      };
+
+      Object.defineProperty(pro,'__bilalaiExecutionGuardInstalled',{
+        value:true,enumerable:false,configurable:false
+      });
+
+      console.info('[BilalAI Pro] runTask uyumluluk katmanı aktif.');
+    }
+
+    window.BilalAIPro=pro;
+    return true;
+  }catch(error){
+    console.warn('[BilalAI] Pro modülü yüklenemedi; Flash kullanılabilir.',error);
+    return false;
+  }
 })();
 </script>
 <script>
