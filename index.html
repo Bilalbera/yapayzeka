@@ -1066,7 +1066,7 @@
 
       <div class="admin-tab-content" data-content="system"><textarea class="admin-textarea" id="systemMsgInput" rows="3" placeholder="Sistem mesajı"></textarea><button class="btn-primary" id="sendSystemMsgBtn" style="margin-top:7px">Yayınla</button><div class="sub-title" style="margin-top:12px">Geçmiş</div><div id="systemMsgHistory" class="sys-msg-list"></div></div>
 
-      <div class="admin-tab-content" data-content="settings"><div class="settings-actions"><button class="btn-secondary" id="exportJsonBtn">Tüm JSON</button><button class="btn-secondary" id="exportTxtBtn">TXT</button></div><div class="setting-row"><span>Vurgu rengi</span><input type="color" id="accentColor" value="#22b8ff"></div><div class="setting-row"><span>Welcome ekranı</span><input type="checkbox" id="showWelcome" checked></div><div class="setting-row"><span>Varsayılan model</span><select class="admin-input" id="defaultModel"><option value="flash">Flash 1.2</option><option value="flashlite">FlashLite 1.0</option></select></div><div class="danger-zone"><div class="sub-title" style="color:#ff8996">Tehlikeli Bölge</div><button class="btn-danger" id="resetMemoryBtn">Tüm veriyi sıfırla</button><div style="margin-top:9px"><input class="admin-input" id="oldPass" placeholder="Mevcut parola"><input class="admin-input" id="newPass" placeholder="Yeni parola" style="margin-top:5px"><input class="admin-input" id="newPass2" placeholder="Yeni parola tekrar" style="margin-top:5px"><button class="btn-secondary" id="changePassBtn" style="margin-top:5px">Parolayı güncelle</button></div></div><div class="sub-title" style="margin-top:12px">Depolama</div><ul id="storageInfo" class="storage-info"></ul></div>
+      <div class="admin-tab-content" data-content="settings"><div class="settings-actions"><button class="btn-secondary" id="exportJsonBtn">Tüm JSON</button><button class="btn-secondary" id="exportTxtBtn">TXT</button></div><div class="setting-row"><span>Vurgu rengi</span><input type="color" id="accentColor" value="#22b8ff"></div><div class="setting-row"><span>Welcome ekranı</span><input type="checkbox" id="showWelcome" checked></div><div class="setting-row"><span>Varsayılan model</span><select class="admin-input" id="defaultModel"><option value="flash">Flash 1.2</option><option value="flashlite">FlashLite 1.0</option><option value="pro">Pro 1.0</option></select></div><div class="danger-zone"><div class="sub-title" style="color:#ff8996">Tehlikeli Bölge</div><button class="btn-danger" id="resetMemoryBtn">Tüm veriyi sıfırla</button><div style="margin-top:9px"><input class="admin-input" id="oldPass" placeholder="Mevcut parola"><input class="admin-input" id="newPass" placeholder="Yeni parola" style="margin-top:5px"><input class="admin-input" id="newPass2" placeholder="Yeni parola tekrar" style="margin-top:5px"><button class="btn-secondary" id="changePassBtn" style="margin-top:5px">Parolayı güncelle</button></div></div><div class="sub-title" style="margin-top:12px">Depolama</div><ul id="storageInfo" class="storage-info"></ul></div>
     </div>
   </div>
 </div>
@@ -1077,7 +1077,7 @@
 <script>
 window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', { message:e.message, filename:e.filename, line:e.lineno, column:e.colno, error:e.error }); });
 </script>
-<script src="./model.js?v=20260924r6"></script>
+<script src="./flashmodel.js?v=20260924r6"></script>
 <script src="./flashlitemodel.js?v=20260924r6"></script>
 <script src="./promodel.js?v=20260924r1"></script>
 <script src="./script.js?v=20260924r6"></script>
@@ -1373,9 +1373,84 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
     });
   }
 
+  /* =========================================================
+     PRO 1.0 BRIDGE
+     Pro agent'ın ürettiği dosyalar gerçekten bu workspace'e
+     (IndexedDB + dosya ağacı) yazılır; preview gerçek dosyalardan
+     hazırlanır. Flash/FlashLite akışına dokunulmaz.
+  ========================================================= */
+  function proWriteFile(path, content){
+    const name=String(path||'').replace(/^\.?\//,'');
+    if(!name) return false;
+    files[name]={content:String(content??''),language:name.split('.').pop()||'',updatedAt:new Date().toISOString()};
+    Promise.resolve()
+      .then(()=>persistFile(name))
+      .catch(e=>console.warn('Pro dosya kaydı:',e));
+    renderFiles(); updateStorageLabel();
+    if(!currentFile || currentFile===name) selectFile(name);
+    return true;
+  }
+
+  const proWorkspace={
+    kind:'bilalai-workspace',
+    listFiles:()=>Object.keys(files),
+    readFile:(p)=>{const n=String(p||'').replace(/^\.?\//,'');return files[n]?files[n].content:null;},
+    writeFile:proWriteFile,
+    updateFile:proWriteFile,
+    deleteFile:(p)=>{const n=String(p||'').replace(/^\.?\//,'');if(!files[n])return false;delete files[n];if(workspaceReady)idbDelete(n).catch(()=>{});renderFiles();return true;},
+    exists:(p)=>!!files[String(p||'').replace(/^\.?\//,'')],
+    clear:()=>{Object.keys(files).forEach(k=>delete files[k]);if(workspaceReady)idbClear().catch(()=>{});renderFiles();return true;}
+  };
+
+  function inlinePreviewHtml(map){
+    let htmlKey=null;
+    Object.keys(map).forEach(k=>{ if(/\.html?$/i.test(k) && (htmlKey===null || /index\.html$/i.test(k))) htmlKey=k; });
+    if(htmlKey===null) return null;
+    let out=String(map[htmlKey]||'')
+      .replace(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi,'')
+      .replace(/<script[^>]+src=["'][^"']+["'][^>]*>\s*<\/script>/gi,'');
+    let css='',js='';
+    Object.keys(map).forEach(k=>{
+      if(/\.css$/i.test(k)) css+='\n/* '+k+' */\n'+map[k];
+      if(/\.js$/i.test(k)) js+='\n/* '+k+' */\n'+map[k];
+    });
+    if(css) out=/<\/head>/i.test(out)?out.replace(/<\/head>/i,'<style>'+css+'\n</style></head>'):'<style>'+css+'\n</style>'+out;
+    if(js) out=/<\/body>/i.test(out)?out.replace(/<\/body>/i,'<scr'+'ipt>\n'+js+'\n</scr'+'ipt></body>'):out+'<scr'+'ipt>\n'+js+'\n</scr'+'ipt>';
+    return out;
+  }
+
+  const proPreview={
+    previewProject(map){
+      const html=inlinePreviewHtml(map||{});
+      if(html==null) return {available:false,reason:'no_html_entry',note:'Preview için index.html bulunamadı.'};
+      const frame=$('#htmlPreviewFrame'), code=$('#previewCode');
+      if(frame){frame.hidden=false; if(code)code.hidden=true; frame.srcdoc=html;}
+      const title=$('#previewTitle'); if(title) title.textContent='Pro Preview — index.html';
+      return {available:true,type:'html',url:'srcdoc',title:'BilalAI Pro Preview',html};
+    }
+  };
+
+  function setupProBridge(){
+    window.BilalAIProBridge={workspace:proWorkspace,preview:proPreview};
+    if(window.BilalAIPro && typeof window.BilalAIPro.setWorkspace==='function'){
+      window.BilalAIPro.setWorkspace(proWorkspace);
+    }
+    if(window.BilalAIPro && typeof window.BilalAIPro.onEvent==='function'){
+      window.BilalAIPro.onEvent((ev)=>{
+        if(!ev) return;
+        if(ev.type==='file:created'||ev.type==='file:updated') toast('📄 '+ev.path);
+        else if(ev.type==='validation:failed') toast('⚠️ Self-check hata buldu, düzeltiliyor…');
+        else if(ev.type==='validation:passed') toast('✓ Self-check geçti');
+        else if(ev.type==='preview:ready') toast('▶ Preview hazır');
+      });
+    }
+  }
+
   async function setup(){
     renderModelPicker(); renderFiles(); updateStorageLabel();
     await initWorkspaceDB();
+    setupProBridge();
+
 
     $('#modelSelector')?.addEventListener('change',e=>chooseModel(e.target.value));
     $('#modelPickerBtn')?.addEventListener('click',e=>{e.stopPropagation();const menu=$('#modelPickerMenu');const open=menu.classList.toggle('open');$('#modelPickerBtn').classList.toggle('open',open);$('#modelPickerBtn').setAttribute('aria-expanded',open?'true':'false');});
