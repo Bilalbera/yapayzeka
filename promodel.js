@@ -3334,34 +3334,14 @@ function createBilalAI() {
  * SECTION 19 — Exports
  * ========================================================================== */
 
-// Create the default singleton instance
-const BilalAI = createBilalAI();
+const BilalAIPro = createBilalAI();
 
-// Named exports
-export {
-  MODEL,
-  CONFIG,
-  createBilalAI,
-  createEventBus,
-  createWorkspaceManager,
-  createContextAnalyzer,
-  createIntentParser,
-  createChangeEngine,
-  createPlanner,
-  createTestGenerator,
-  createStaticValidator,
-  createRuntimeAdapter,
-  createCodeCleaner,
-  createProjectMemory,
-  createFinalReporter,
-  createPreviewBuilder,
-  createTaskRunner,
-  parseHTML,
-  parseCSS,
-  parseJS,
-  parseFile,
-  detectFileType,
-};
+/* Browser */
+if (typeof window !== 'undefined') {
+  window.BilalAIPro = BilalAIPro;
+}
 
-// Default export is the singleton instance
-export default BilalAI;
+/* Node.js / CommonJS */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = BilalAIPro;
+}
