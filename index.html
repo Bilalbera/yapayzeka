@@ -113,7 +113,7 @@
 
     /* ===== MAIN CHAT ===== */
     .main-column {
-      min-width: 0; display: grid; grid-template-rows: 62px 1fr auto;
+      min-width: 0; min-height: 0; display: grid; grid-template-rows: 62px minmax(0, 1fr) auto;
       background: #0b0c0f;
     }
     .topbar {
@@ -135,8 +135,9 @@
     .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px rgba(65,217,139,.55); }
 
     .messages {
-      overflow: auto; min-width: 0; padding: 22px 20px 30px;
-      scroll-behavior: smooth;
+      min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      padding: 22px 20px 30px; scroll-behavior: smooth;
+      overscroll-behavior: contain; scrollbar-gutter: stable;
     }
     .messages-inner { width: min(100%, var(--chat-w)); margin: 0 auto; }
     .welcome-screen { min-height: 100%; display: grid; place-items: center; padding: 12px 0 70px; }
@@ -197,7 +198,7 @@
     .code-wrap pre { margin:0; padding: 14px; }
 
     /* ===== COMPOSER ===== */
-    .composer-wrap { padding: 12px 18px 16px; background: linear-gradient(180deg, rgba(11,12,15,.84), #0b0c0f 30%); border-top: 1px solid rgba(255,255,255,.035); }
+    .composer-wrap { min-width: 0; min-height: 0; padding: 12px 18px 16px; background: linear-gradient(180deg, rgba(11,12,15,.84), #0b0c0f 30%); border-top: 1px solid rgba(255,255,255,.035); }
     .composer { width:min(100%, var(--chat-w)); margin:0 auto; }
     .composer-box {
       border: 1px solid var(--line-strong); background: #111418; border-radius: 15px;
@@ -1367,7 +1368,8 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
     // script.js içindeki built-in MODELS Pro'yu tanımadığı için Pro mesajlarının
     // etiketini burada görünür biçimde düzeltiyoruz.
     $$('.message-row.assistant[data-model="pro"] .message-model-tag').forEach(el=>{
-      el.textContent='🧠 BilalAI - Pro 1.0';
+      const next='🧠 BilalAI - Pro 1.0';
+      if(el.textContent!==next) el.textContent=next;
     });
   }
 
@@ -1413,10 +1415,29 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
 
     const messages=$('#messages');
     if(messages){
-      const observer=new MutationObserver(()=>{setTimeout(ingestCodeBlocks,100);syncRenderedModelLabels();});
+      let enhancementTimer=0;
+      const scheduleMessageEnhancements=()=>{
+        if(enhancementTimer) return;
+        enhancementTimer=window.setTimeout(async()=>{
+          enhancementTimer=0;
+          try{
+            await ingestCodeBlocks();
+            syncRenderedModelLabels();
+          }catch(err){
+            console.warn('Mesaj/workspace işleme hatası:',err);
+          }
+        },60);
+      };
+
+      const observer=new MutationObserver(records=>{
+        // Sadece yeni düğümler geldiğinde çalış. Böylece observer kendi yaptığı
+        // textContent/DOM değişiklikleriyle sonsuz döngü oluşturmaz.
+        const hasAddedNodes=records.some(r=>r.type==='childList' && r.addedNodes && r.addedNodes.length);
+        if(hasAddedNodes) scheduleMessageEnhancements();
+      });
       observer.observe(messages,{subtree:true,childList:true});
+      scheduleMessageEnhancements();
     }
-    setInterval(()=>{ingestCodeBlocks();syncRenderedModelLabels();renderModelPicker();},900);
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup);else setup();
@@ -1427,44 +1448,56 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
 (function(){
   'use strict';
 
-  // UI stability patch: keep the message pane independently scrollable and
-  // auto-stick to the newest response until the user deliberately scrolls up.
+  // UI stability: the chat pane owns scrolling; mutations are coalesced into
+  // a single animation frame so streaming responses cannot flood the renderer.
   const messages = document.getElementById('messages');
   if(messages){
     let stickToBottom = true;
-    const nearBottom = () => messages.scrollHeight - messages.scrollTop - messages.clientHeight < 90;
+    let scrollFrame = 0;
+
+    const nearBottom = () =>
+      messages.scrollHeight - messages.scrollTop - messages.clientHeight < 90;
 
     messages.addEventListener('scroll', () => {
       stickToBottom = nearBottom();
     }, {passive:true});
 
     const scrollToLatest = (behavior='auto') => {
-      if(!stickToBottom) return;
-      requestAnimationFrame(() => {
-        messages.scrollTo({ top: messages.scrollHeight, behavior });
+      if(!stickToBottom || scrollFrame) return;
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0;
+        if(stickToBottom){
+          messages.scrollTo({top:messages.scrollHeight, behavior});
+        }
       });
     };
 
-    new MutationObserver(() => {
-      scrollToLatest('smooth');
-    }).observe(messages, {subtree:true, childList:true, characterData:true});
+    const observer = new MutationObserver(records => {
+      const relevant = records.some(r =>
+        (r.type === 'childList' && r.addedNodes && r.addedNodes.length) ||
+        r.type === 'characterData'
+      );
+      if(relevant) scrollToLatest('smooth');
+    });
+    observer.observe(messages,{subtree:true,childList:true,characterData:true});
 
-    window.addEventListener('load', () => scrollToLatest('auto'));
-    setTimeout(() => scrollToLatest('auto'), 50);
+    window.addEventListener('load',()=>scrollToLatest('auto'),{once:true});
+    requestAnimationFrame(()=>scrollToLatest('auto'));
   }
 
-  // Composer: predictable multiline growth without pushing the whole layout.
+  // Composer: multiline input grows up to a fixed limit and then scrolls itself.
   const input = document.getElementById('messageInput');
   if(input){
     const resize = () => {
       input.style.height = 'auto';
       const max = 190;
-      input.style.height = Math.min(input.scrollHeight, max) + 'px';
+      const next = Math.min(input.scrollHeight, max);
+      input.style.height = next + 'px';
       input.style.overflowY = input.scrollHeight > max ? 'auto' : 'hidden';
     };
-    input.addEventListener('input', resize);
-    input.addEventListener('focus', resize);
-    resize();
+    input.addEventListener('input',resize);
+    input.addEventListener('focus',resize);
+    requestAnimationFrame(resize);
   }
 })();
 </script>
