@@ -3345,3 +3345,27 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = BilalAIPro;
 }
+
+/* ============================================================================
+ * Legacy Compatibility
+ * ========================================================================== */
+
+if (typeof window !== 'undefined') {
+  window.generateResponse = async function (userMsg, contextArray = []) {
+    if (
+      window.BilalAIPro &&
+      typeof window.BilalAIPro.generateAsync === 'function'
+    ) {
+      const result = await window.BilalAIPro.generateAsync(userMsg);
+
+      // UI tarafına string döndür
+      if (result && typeof result.formatted === 'string') {
+        return result.formatted;
+      }
+
+      return JSON.stringify(result);
+    }
+
+    throw new Error('BilalAIPro.generateAsync bulunamadı.');
+  };
+}
