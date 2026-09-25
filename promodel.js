@@ -16,7 +16,8 @@ Public API (window.BilalAIPro):
   generate(userMsg, context, options)          -> senkron pipeline
   generateAsync(userMsg, context, options)      -> async pipeline (Promise)
   runTask(userMsg, options)                      -> async agent akışı (Promise)
-  getPlan(userMsg)
+  analyze(userMsg, options) / plan(userMsg, options) / getPlan(userMsg)
+  getChanges()
   getState()
   getTasks()
   getFiles()
@@ -54,6 +55,7 @@ Durum akışı:
       simple: [800, 1600],
       medium: [1600, 3200],
       complex: [3200, 6000],
+      'very-complex': [4000, 7000],
     },
     stepDelayMs: 90,
     debug: false,
@@ -183,6 +185,14 @@ Durum akışı:
       tasks: [],
       files: [],       // {path, content, language, status}
       changes: [],
+      notes: [],
+      dependencies: [],
+      fixes: [],
+      detected: [],
+      remainingIssues: [],
+      validation: null,
+      analysis: null,
+      events: [],
       errors: [],
       warnings: [],
       tests: [],
@@ -480,80 +490,6 @@ Durum akışı:
     return { analyze: analyze, extractExplicitFiles: extractExplicitFiles };
   })();
 
-  /* =================================================
-     9. PLANNER + TASK MANAGER
-  ================================================= */
-
-  var Planner = (function () {
-    function build(analysis) {
-      var tasks = [];
-      tasks.push({ id: uid('t'), title: 'Gereksinimleri analiz et', type: 'analyze' });
-
-      if (analysis.complexity !== 'simple') {
-        tasks.push({ id: uid('t'), title: 'Proje yapısını oluştur', type: 'scaffold' });
-      } else {
-        tasks.push({ id: uid('t'), title: 'Proje dosyalarını hazırla', type: 'scaffold' });
-      }
-
-      // Dosya başına oluşturma adımı (izlenebilir events).
-      analysis.files.forEach(function (f) {
-        tasks.push({ id: uid('t'), title: f + ' oluştur', type: 'create-file', path: f });
-      });
-
-      tasks.push({ id: uid('t'), title: 'Kodları doğrula ve hataları düzelt', type: 'verify-fix' });
-
-      if (analysis.requiresPreview) {
-        tasks.push({ id: uid('t'), title: 'Preview hazırla', type: 'preview' });
-      } else {
-        tasks.push({ id: uid('t'), title: 'Çalıştırma notlarını hazırla', type: 'notes' });
-      }
-      return tasks;
-    }
-    return { build: build };
-  })();
-
-  var TaskManager = (function () {
-    function init(tasks) {
-      STATE.tasks = tasks.map(function (t) {
-        return { id: t.id, title: t.title, type: t.type, path: t.path || null,
-          status: 'pending', startedAt: null, finishedAt: null };
-      });
-      STATE.plan = STATE.tasks.map(function (t) { return t.title; });
-      return STATE.tasks;
-    }
-    function find(id) {
-      for (var i = 0; i < STATE.tasks.length; i++) if (STATE.tasks[i].id === id) return STATE.tasks[i];
-      return null;
-    }
-    function start(id) {
-      var t = find(id);
-      if (t) { t.status = 'running'; t.startedAt = Date.now(); bus.emit('task:started', { task: clone(t) }); }
-      return t;
-    }
-    function complete(id) {
-      var t = find(id);
-      if (t) { t.status = 'completed'; t.finishedAt = Date.now(); bus.emit('task:completed', { task: clone(t), scope: 'step' }); }
-      return t;
-    }
-    function fail(id, reason) {
-      var t = find(id);
-      if (t) { t.status = 'failed'; t.finishedAt = Date.now(); bus.emit('task:failed', { task: clone(t), reason: reason, scope: 'step' }); }
-      return t;
-    }
-    function progress() {
-      var total = STATE.tasks.length;
-      var done = STATE.tasks.filter(function (t) { return t.status === 'completed'; }).length;
-      return { completed: done, total: total, percentage: total ? Math.round((done / total) * 100) : 0 };
-    }
-    function render() {
-      var sym = { pending: '☐', running: '▶', completed: '✓', failed: '✗' };
-      var p = progress();
-      var lines = ['To-dos ' + p.completed + '/' + p.total];
-      STATE.tasks.forEach(function (t) { lines.push((sym[t.status] || '☐') + ' ' + t.title); });
-      return lines.join('\n');
-    }
-    return { init: init, find: find, start: start, complete: complete, fail: fail, progress: progress, render: render };
-  })();
 
   /* =================================================
      10. CODE GENERATOR (gerçek, çalışan içerik)
@@ -1128,8 +1064,461 @@ Durum akışı:
     return { generate: generate, roleOf: roleOf };
   })();
 
+
   /* =================================================
-     11. VALIDATOR
+     11. EVENT HELPERS (standart event şeması)
+     Her event: { type, timestamp, message, metadata, ...metadata }
+     Eski dinleyiciler için metadata alanları düz olarak da taşınır.
+  ================================================= */
+
+  function emit(type, message, metadata, legacyType) {
+    var meta = metadata || {};
+    var payload = Object.assign({}, meta, { message: message || '', metadata: clone(meta) });
+    var evt = bus.emit(type, payload);
+    if (STATE.events) {
+      STATE.events.push({ type: type, timestamp: evt.timestamp, message: message || '', metadata: clone(meta) });
+      if (STATE.events.length > 400) STATE.events.shift();
+    }
+    if (legacyType) bus.emit(legacyType, payload);
+    return evt;
+  }
+
+  function note(text) { STATE.notes.push(text); }
+
+  function recordError(err, info) {
+    info = info || {};
+    var rec = {
+      type: info.type || (err && err.name) || 'AgentError',
+      message: (err && err.message) || String(err),
+      task: info.task || STATE.currentStep || null,
+      file: info.file || null,
+      stack: (err && err.stack) || null,
+      timestamp: Date.now(),
+    };
+    STATE.errors.push(rec);
+    return rec;
+  }
+
+  /* =================================================
+     12. CONTEXT MEMORY (önceki mesajlar + son proje)
+  ================================================= */
+
+  var MEMORY = { history: [], project: null };
+
+  function remember(userMsg, analysis) {
+    MEMORY.history.push({ message: String(userMsg || '').slice(0, 400), intent: analysis.intent,
+      projectType: analysis.projectType, techKind: analysis.techKind, timestamp: Date.now() });
+    if (MEMORY.history.length > 30) MEMORY.history.shift();
+    MEMORY.project = { projectType: analysis.projectType, techKind: analysis.techKind,
+      framework: analysis.framework, files: STATE.files.map(function (f) { return f.path; }) };
+  }
+
+  /* =================================================
+     13. PROJECT ANALYZER (workspace'i okur)
+  ================================================= */
+
+  function filesMapFromWorkspace(workspace) {
+    var map = {};
+    workspace.listFiles().forEach(function (p) {
+      var c = workspace.readFile(p);
+      if (c != null) map[p] = String(c);
+    });
+    return map;
+  }
+
+  function firstByExt(files, exts) {
+    var keys = Object.keys(files);
+    for (var i = 0; i < keys.length; i++) {
+      if (exts.indexOf(ext(keys[i])) !== -1 && /(^|\/)index\.html?$/i.test(keys[i])) return keys[i];
+    }
+    for (var j = 0; j < keys.length; j++) if (exts.indexOf(ext(keys[j])) !== -1) return keys[j];
+    return null;
+  }
+
+  var ProjectAnalyzer = (function () {
+    function analyze(workspace) {
+      var files = filesMapFromWorkspace(workspace);
+      var paths = Object.keys(files);
+      var all = paths.map(function (p) { return files[p]; }).join('\n');
+      var pkg = null;
+      if (files['package.json']) { try { pkg = JSON.parse(files['package.json']); } catch (e) { pkg = null; } }
+      var deps = pkg ? Object.assign({}, pkg.dependencies || {}, pkg.devDependencies || {}) : {};
+
+      var techKind = 'none', framework = null;
+      if (deps.react || paths.some(function (p) { return /\.(jsx|tsx)$/.test(p); })) { techKind = 'react'; framework = deps.next ? 'Next.js' : 'React'; }
+      else if (paths.some(function (p) { return ext(p) === 'py'; })) { techKind = 'python'; framework = /discord/.test(all) ? 'discord.py' : null; }
+      else if (pkg && !paths.some(function (p) { return ext(p) === 'html'; })) { techKind = 'node'; framework = deps.express ? 'Express' : 'Node.js'; }
+      else if (paths.some(function (p) { return ext(p) === 'html'; })) { techKind = 'web'; framework = 'vanilla'; }
+
+      var entry = null;
+      ['index.html', 'src/main.jsx', 'main.py', 'bot.py', 'index.js'].forEach(function (e) { if (!entry && files[e] != null) entry = e; });
+      if (!entry) entry = paths[0] || null;
+
+      var projectType = 'generic';
+      if (/addTodo|todo-list|todos/.test(all)) projectType = 'todo';
+      else if (/data-num|calc/.test(all)) projectType = 'calculator';
+      else if (/Dashboard|StatCard/.test(all)) projectType = 'dashboard';
+      else if (/discord/.test(all)) projectType = 'discord-bot';
+      else if (/login-form/.test(all)) projectType = 'login';
+      else if (/hero|landing/i.test(all)) projectType = 'landing';
+
+      var features = {
+        localStorage: /localStorage/.test(all),
+        responsive: /@media/.test(all),
+        darkMode: /theme-toggle|theme-dark/.test(all),
+        login: paths.some(function (p) { return /login/i.test(p); }) || /login-form/.test(all),
+      };
+
+      return {
+        fileCount: paths.length, files: paths, techKind: techKind, framework: framework, entry: entry,
+        projectType: projectType, dependencies: Object.keys(deps), features: features,
+        structure: paths.map(function (p) { return { path: p, language: langOf(p), lines: files[p].split('\n').length }; }),
+      };
+    }
+    return { analyze: analyze };
+  })();
+
+  /* =================================================
+     14. CONTEXT ANALYZER (yeni proje mi, mevcut projede değişiklik mi?)
+  ================================================= */
+
+  var ContextAnalyzer = (function () {
+    var MODIFY_RE = /(^|[\s,.;])(ekle|ekler misin|ekleyin|ekleyelim|ekleyebilir misin|guncelle|degistir|iyilestir|duzenle|yap)([\s,.;!?]|$)/;
+    var EXIST_RE = /mevcut|bu proje|projeye|projemi|projemde|uygulamasina|uygulamaya|var olan|onceki|dosyasindaki|dosyasinda/;
+    var FIX_RE = /hata|bug|duzelt|fix|calismiyor|bozuk/;
+    var CREATE_RE = /olustur|gelistir|create|build|sifirdan|yeni /;
+    var NEW_RE = /yeni proje|sifirdan|bastan|yeni bir/;
+
+    function modificationsFrom(t) {
+      var mods = [];
+      if (/dark|karanlik|koyu|tema/.test(t)) mods.push({ kind: 'dark-mode', title: 'Dark mode ekle' });
+      if (/responsive|mobil|uyumlu/.test(t)) mods.push({ kind: 'responsive', title: 'Responsive düzeni güçlendir' });
+      if (/login|giris|oturum|auth|kayit/.test(t)) mods.push({ kind: 'login', title: 'Login sistemi ekle' });
+      return mods;
+    }
+
+    function analyze(t, base, project) {
+      var hasProject = project.fileCount > 0;
+      var intent = 'create', reason = 'Yeni proje isteği.';
+      var isFix = FIX_RE.test(t) && !CREATE_RE.test(t);
+      if (isFix) { intent = 'fix'; reason = 'Hata bulma/düzeltme isteği.'; }
+      else if (hasProject && !NEW_RE.test(t)) {
+        var mods = modificationsFrom(t);
+        var existCue = EXIST_RE.test(t);
+        var modifyCue = MODIFY_RE.test(t) && !CREATE_RE.test(t);
+        if ((existCue || modifyCue) && (mods.length || existCue)) {
+          intent = 'modify'; reason = 'Mevcut projede değişiklik isteği (workspace: ' + project.fileCount + ' dosya).';
+        } else if (t.length < 60 && base.projectType === 'generic' && mods.length) {
+          intent = 'modify'; reason = 'Kısa takip mesajı; önceki proje üzerinde değişiklik olarak yorumlandı.';
+        }
+      }
+      var mods2 = intent === 'modify' ? modificationsFrom(t) : [];
+      return { intent: intent, reason: reason, hasProject: hasProject, modifications: mods2,
+        previous: MEMORY.history.length ? MEMORY.history[MEMORY.history.length - 1] : null };
+    }
+    return { analyze: analyze, modificationsFrom: modificationsFrom };
+  })();
+
+  /* =================================================
+     15. COMPLEXITY ANALYZER
+  ================================================= */
+
+  var ComplexityAnalyzer = (function () {
+    var VERY = /saas|full.?stack|platform|e-?ticaret|marketplace|mikroservis|microservice|multi.?tenant/;
+    var HEAVY = ['jwt', 'auth', 'postgres', 'mysql', 'mongodb', 'veritabani', 'database', 'rest api', ' api', 'admin',
+      'dashboard', 'backend', 'react', 'express', 'websocket', 'odeme', 'payment'];
+    var LIGHT = /basit|iki sayi|topla|hello world|kucuk|mini|ornek/;
+    function classify(t, base) {
+      if (VERY.test(t)) return 'very-complex';
+      var hits = HEAVY.filter(function (w) { return t.indexOf(w) !== -1; }).length;
+      if (hits >= 2 || base.complexity === 'complex') return 'complex';
+      if (LIGHT.test(t) || base.complexity === 'simple') return 'simple';
+      return 'medium';
+    }
+    return { classify: classify };
+  })();
+
+  /* =================================================
+     16. REQUIREMENT EXTRACTOR
+  ================================================= */
+
+  var RequirementExtractor = (function () {
+    var FEATURE_DEFAULTS = {
+      todo: ['Görev ekleme', 'Görev silme', 'Görev tamamlama', 'LocalStorage kalıcılığı', 'Boş görev engelleme', 'Enter ile ekleme'],
+      calculator: ['Rakam girişi', 'Dört işlem', 'Temizleme', 'Hatalı ifade koruması'],
+      login: ['E-posta doğrulama', 'Şifre uzunluk kontrolü', 'Hata mesajları'],
+      dashboard: ['Kenar menü', 'İstatistik kartları', 'Dashboard görünümü'],
+      'discord-bot': ['Komut işleme', '.env ile token yönetimi'],
+      landing: ['Hero bölümü', 'Yumuşak kaydırma'],
+    };
+    function extract(t, base, ctx) {
+      var f = base.features;
+      var functional = (FEATURE_DEFAULTS[base.projectType] || ['Temel uygulama akışı']).slice();
+      ctx.modifications.forEach(function (m) { functional.push(m.title); });
+      var ui = [];
+      if (f.responsive || /responsive/.test(t)) ui.push('Responsive tasarım');
+      if (/modern/.test(t)) ui.push('Modern UI');
+      if (f.darkTheme) ui.push('Koyu tema');
+      if (f.animation) ui.push('Animasyonlar');
+      var explicit = [];
+      if (base.explicitFiles) explicit.push('Ayrı dosyalar: ' + base.files.join(', '));
+      if (f.localStorage) explicit.push('LocalStorage desteği');
+      ui.forEach(function (u) { explicit.push(u); });
+      if (/plan/.test(t)) explicit.push('Önce plan çıkarılması');
+      if (/self.?check|kontrol/.test(t)) explicit.push('Self-check yapılması');
+      var implicit = ['Semantik HTML', 'Erişilebilir etiketler', 'Güvenli DOM yazımı (textContent)', 'Viewport meta etiketi'];
+      if (base.techKind === 'python') implicit = ['Token/sırların koddan ayrılması', 'Hata yakalama', 'main guard'];
+      if (base.techKind === 'react') implicit = ['Bileşen ayrımı', 'Import tutarlılığı', 'package.json bağımlılıkları'];
+      var technical = [base.language, base.framework || 'vanilla'].concat(base.files);
+      return {
+        explicitRequirements: explicit,
+        implicitRequirements: implicit,
+        technicalRequirements: technical,
+        uiRequirements: ui,
+        functionalRequirements: functional,
+        features: functional,
+        priority: /acil|hemen|asap|urgent|kritik/.test(t) ? 'high' : 'normal',
+      };
+    }
+    return { extract: extract };
+  })();
+
+  /* =================================================
+     17. REQUEST ANALYZER (tüm analizleri birleştirir)
+  ================================================= */
+
+  var RequestAnalyzer = (function () {
+    function analyze(userMsg, workspace) {
+      var base = Analyzer.analyze(userMsg);
+      var t = norm(base.raw);
+      var project = ProjectAnalyzer.analyze(workspace || defaultWorkspace);
+      var ctx = ContextAnalyzer.analyze(t, base, project);
+      var a = Object.assign({}, base);
+
+      if ((ctx.intent === 'modify' || ctx.intent === 'fix') && project.fileCount) {
+        a.techKind = project.techKind === 'none' ? base.techKind : project.techKind;
+        if (project.projectType !== 'generic') a.projectType = project.projectType;
+        a.framework = project.framework;
+        a.files = project.files.slice();
+        a.explicitFiles = false;
+      }
+      // Dosya adı verilmiş ama proje türü belirsiz: mevcut projenin türünü koru (işi silme).
+      if (ctx.intent === 'create' && base.projectType === 'generic' && project.projectType !== 'generic' && project.techKind === base.techKind) {
+        a.projectType = project.projectType;
+      }
+      a.intent = ctx.intent;
+      a.context = ctx;
+      a.project = project;
+      a.complexity = ComplexityAnalyzer.classify(t, base);
+      a.requirements = RequirementExtractor.extract(t, base, ctx);
+      a.priority = a.requirements.priority;
+      a.projectKind = a.techKind === 'python' ? 'python-app' : a.techKind === 'node' ? 'node-app' : a.techKind === 'react' ? 'react-app' : 'web-app';
+      a.frameworkName = a.framework || 'vanilla';
+      a.requiresPreview = a.techKind === 'web' || a.techKind === 'react';
+      a.requiresTesting = true;
+      a.targetFiles = Analyzer.extractExplicitFiles(base.raw);
+      a.needsResearch = /\b(react|next|vue)\s?\d{2}\b|dokumantasyon|documentation|docs/.test(t);
+      return a;
+    }
+    return { analyze: analyze };
+  })();
+
+  /* =================================================
+     18. CHANGE TRACKER + WORKSPACE MANAGER
+  ================================================= */
+
+  var ChangeTracker = (function () {
+    function record(action, path, before, after, reason, extra) {
+      var c = Object.assign({ id: uid('chg'), action: action, path: path,
+        before: before == null ? null : before, after: after == null ? null : after,
+        reason: reason || '', timestamp: Date.now() }, extra || {});
+      STATE.changes.push(c);
+      return c;
+    }
+    function summary() {
+      return STATE.changes.map(function (c) {
+        return c.action.toUpperCase() + ' ' + (c.from ? c.from + ' → ' : '') + c.path;
+      });
+    }
+    function counts() {
+      var out = { create: 0, update: 0, delete: 0, rename: 0, move: 0 };
+      STATE.changes.forEach(function (c) { out[c.action] = (out[c.action] || 0) + 1; });
+      return out;
+    }
+    return { record: record, summary: summary, counts: counts };
+  })();
+
+  var WorkspaceManager = (function () {
+    function upsertState(path, content, status) {
+      var entry = { path: path, content: content, language: langOf(path), status: status };
+      for (var i = 0; i < STATE.files.length; i++) {
+        if (STATE.files[i].path === path) {
+          if (STATE.files[i].status === 'created' && status === 'updated') entry.status = 'created';
+          STATE.files[i] = entry; return entry;
+        }
+      }
+      STATE.files.push(entry);
+      return entry;
+    }
+    function write(ws, path, content, reason) {
+      var existed = ws.exists(path);
+      var before = existed ? ws.readFile(path) : null;
+      if (existed && before === content) { upsertState(path, content, 'unchanged'); return null; }
+      if (existed) ws.updateFile(path, content); else ws.writeFile(path, content);
+      var action = existed ? 'update' : 'create';
+      ChangeTracker.record(action, path, before, content, reason);
+      var entry = upsertState(path, content, existed ? 'updated' : 'created');
+      emit(existed ? 'file:update' : 'file:create', (existed ? '✏️ ' : '📁 ') + path + (existed ? ' güncellendi.' : ' oluşturuldu.'),
+        { path: path, language: entry.language, reason: reason || '' }, existed ? 'file:updated' : 'file:created');
+      return entry;
+    }
+    function remove(ws, path, reason) {
+      if (!ws.exists(path)) return false;
+      var before = ws.readFile(path);
+      ws.deleteFile(path);
+      ChangeTracker.record('delete', path, before, null, reason);
+      STATE.files = STATE.files.filter(function (f) { return f.path !== path; });
+      emit('file:delete', '🗑 ' + path + ' silindi.', { path: path, reason: reason || '' }, 'file:deleted');
+      return true;
+    }
+    function rename(ws, from, to, reason, action) {
+      if (!ws.exists(from)) return false;
+      var content = ws.readFile(from);
+      ws.writeFile(to, content);
+      ws.deleteFile(from);
+      ChangeTracker.record(action || 'rename', to, content, content, reason, { from: from });
+      STATE.files = STATE.files.filter(function (f) { return f.path !== from; });
+      upsertState(to, content, 'created');
+      emit('file:' + (action || 'rename'), '🔀 ' + from + ' → ' + to, { from: from, path: to, reason: reason || '' });
+      return true;
+    }
+    function move(ws, from, to, reason) { return rename(ws, from, to, reason, 'move'); }
+    return { write: write, remove: remove, rename: rename, move: move };
+  })();
+
+  /* =================================================
+     19. CODE EDITOR (mevcut projede değişiklik)
+  ================================================= */
+
+  var CodeEditor = (function () {
+    var THEME_CSS = '\n/* BilalAI Pro: tema (dark mode) */\n' +
+      '.theme-toggle {\n  position: fixed;\n  top: 12px;\n  right: 12px;\n  z-index: 50;\n  width: 42px;\n  height: 42px;\n' +
+      '  border-radius: 999px;\n  border: 1px solid rgba(127, 127, 127, 0.4);\n  background: rgba(127, 127, 127, 0.15);\n' +
+      '  color: inherit;\n  font-size: 18px;\n  cursor: pointer;\n}\n' +
+      'body.theme-dark {\n  background: #0f1115;\n  color: #e6e6e6;\n}\n' +
+      'body.theme-dark main, body.theme-dark .app, body.theme-dark form, body.theme-dark li, body.theme-dark .card {\n' +
+      '  background-color: #171a21;\n  color: #e6e6e6;\n  border-color: #2a2f3a;\n}\n' +
+      'body.theme-dark input, body.theme-dark textarea, body.theme-dark select {\n  background: #1f232c;\n  color: #e6e6e6;\n  border-color: #343a46;\n}\n' +
+      'body.theme-light {\n  background: #f5f6f8;\n  color: #1b1d22;\n}\n' +
+      'body.theme-light main, body.theme-light .app, body.theme-light form, body.theme-light li, body.theme-light .card {\n' +
+      '  background-color: #ffffff;\n  color: #1b1d22;\n  border-color: #dde1e7;\n}\n' +
+      'body.theme-light input, body.theme-light textarea, body.theme-light select {\n  background: #ffffff;\n  color: #1b1d22;\n  border-color: #cfd4dc;\n}\n';
+
+    var THEME_JS = '\n// BilalAI Pro: tema (dark mode) değiştirici\n(function () {\n' +
+      "  var KEY = 'bilalai-theme';\n" +
+      "  var btn = document.getElementById('theme-toggle');\n" +
+      '  function apply(theme) {\n' +
+      "    document.body.classList.toggle('theme-dark', theme === 'dark');\n" +
+      "    document.body.classList.toggle('theme-light', theme === 'light');\n" +
+      "    if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';\n" +
+      '  }\n' +
+      '  var saved = null;\n' +
+      '  try { saved = localStorage.getItem(KEY); } catch (e) { saved = null; }\n' +
+      "  var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;\n" +
+      "  apply(saved || (prefersDark ? 'dark' : 'light'));\n" +
+      '  if (btn) {\n' +
+      "    btn.addEventListener('click', function () {\n" +
+      "      var next = document.body.classList.contains('theme-dark') ? 'light' : 'dark';\n" +
+      '      apply(next);\n' +
+      '      try { localStorage.setItem(KEY, next); } catch (e) { /* depolama kapalı olabilir */ }\n' +
+      '    });\n' +
+      '  }\n' +
+      '})();\n';
+
+    var RESPONSIVE_CSS = '\n/* BilalAI Pro: responsive kırılım noktaları */\n' +
+      '@media (max-width: 768px) {\n  body {\n    padding: 12px;\n  }\n  main, .app {\n    width: 100%;\n    max-width: 100%;\n  }\n}\n' +
+      '@media (max-width: 480px) {\n  h1 {\n    font-size: 1.4rem;\n  }\n  form {\n    flex-direction: column;\n  }\n' +
+      '  button, input {\n    width: 100%;\n    min-height: 44px;\n  }\n}\n';
+
+    function insertAfterBodyOpen(html, snippet) {
+      if (/<body[^>]*>/i.test(html)) return html.replace(/<body[^>]*>/i, function (m) { return m + '\n' + snippet; });
+      return snippet + html;
+    }
+    function ensureViewport(html) {
+      if (/name=["']viewport["']/i.test(html)) return html;
+      return html.replace(/<head[^>]*>/i, function (m) {
+        return m + '\n  <meta name="viewport" content="width=device-width, initial-scale=1.0" />';
+      });
+    }
+    function addScriptTag(html, src) {
+      var tag = '  <script src="' + src + '"></script>\n';
+      if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, tag + '</body>');
+      return html + '\n' + tag;
+    }
+
+    function darkMode(ws, files) {
+      var htmlP = firstByExt(files, ['html', 'htm']);
+      if (!htmlP) return { ok: false, message: 'Dark mode için HTML dosyası bulunamadı.' };
+      if (/theme-toggle/.test(files[htmlP])) return { ok: true, skipped: true, message: 'Dark mode zaten mevcut.' };
+      var cssP = firstByExt(files, ['css']) || 'style.css';
+      var jsP = null;
+      Object.keys(files).forEach(function (p) { if (!jsP && ext(p) === 'js' && !/\bimport\s/.test(files[p])) jsP = p; });
+      var html = insertAfterBodyOpen(files[htmlP],
+        '  <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Temayı değiştir">🌙</button>');
+      if (!files[cssP]) html = html.replace(/<\/head>/i, '  <link rel="stylesheet" href="' + cssP + '" />\n</head>');
+      if (!jsP) { jsP = 'theme.js'; html = addScriptTag(html, jsP); }
+      WorkspaceManager.write(ws, htmlP, html, 'Dark mode: tema değiştirme butonu eklendi');
+      WorkspaceManager.write(ws, cssP, (files[cssP] || '') + THEME_CSS, 'Dark mode: açık/koyu tema stilleri eklendi');
+      WorkspaceManager.write(ws, jsP, (files[jsP] || '') + THEME_JS, 'Dark mode: tema değiştirici ve LocalStorage tercihi eklendi');
+      return { ok: true, message: 'Dark mode eklendi (' + htmlP + ', ' + cssP + ', ' + jsP + ').' };
+    }
+
+    function responsive(ws, files) {
+      var htmlP = firstByExt(files, ['html', 'htm']);
+      var cssP = firstByExt(files, ['css']);
+      if (!cssP) return { ok: false, message: 'Responsive düzen için CSS dosyası bulunamadı.' };
+      if (/BilalAI Pro: responsive/.test(files[cssP])) return { ok: true, skipped: true, message: 'Responsive kırılımlar zaten mevcut.' };
+      WorkspaceManager.write(ws, cssP, files[cssP] + RESPONSIVE_CSS, 'Responsive: 768px ve 480px kırılım noktaları eklendi');
+      if (htmlP && !/name=["']viewport["']/i.test(files[htmlP])) {
+        WorkspaceManager.write(ws, htmlP, ensureViewport(files[htmlP]), 'Responsive: viewport meta etiketi eklendi');
+      }
+      return { ok: true, message: 'Responsive kırılım noktaları eklendi (' + cssP + ').' };
+    }
+
+    function login(ws, files, analysis) {
+      if (files['login.html']) return { ok: true, skipped: true, message: 'Login sayfası zaten mevcut.' };
+      var gen = CodeGenerator.generate(Object.assign({}, analysis, {
+        techKind: 'web', projectType: 'login', files: ['login.html', 'login.css', 'login.js'] }));
+      ['login.html', 'login.css', 'login.js'].forEach(function (p) {
+        WorkspaceManager.write(ws, p, gen[p], 'Login sistemi: ' + p + ' oluşturuldu');
+      });
+      var htmlP = firstByExt(files, ['html', 'htm']);
+      if (htmlP && !/href=["']login\.html["']/.test(files[htmlP])) {
+        var html = insertAfterBodyOpen(files[htmlP],
+          '  <nav class="top-nav" aria-label="Hesap"><a href="login.html">Giriş yap</a></nav>');
+        WorkspaceManager.write(ws, htmlP, html, 'Login sistemi: ana sayfaya giriş bağlantısı eklendi');
+        var cssP = firstByExt(files, ['css']);
+        if (cssP) {
+          WorkspaceManager.write(ws, cssP, files[cssP] +
+            '\n/* BilalAI Pro: giriş bağlantısı */\n.top-nav {\n  display: flex;\n  justify-content: flex-end;\n  padding: 8px 12px;\n}\n.top-nav a {\n  color: inherit;\n  font-weight: 600;\n}\n',
+            'Login sistemi: giriş bağlantısı stili eklendi');
+        }
+      }
+      return { ok: true, message: 'Login sistemi eklendi (login.html, login.css, login.js).' };
+    }
+
+    function apply(kind, ws, analysis) {
+      var files = filesMapFromWorkspace(ws);
+      if (kind === 'dark-mode') return darkMode(ws, files);
+      if (kind === 'responsive') return responsive(ws, files);
+      if (kind === 'login') return login(ws, files, analysis);
+      return { ok: false, message: 'Bu değişiklik türü için otomatik düzenleyici yok: ' + kind };
+    }
+    return { apply: apply };
+  })();
+
+  /* =================================================
+     20. VALIDATOR (statik sözdizimi kontrolü)
   ================================================= */
 
   var Validator = (function () {
@@ -1138,327 +1527,727 @@ Durum akışı:
       for (var i = 0; i < content.length; i++) {
         var c = content[i], prev = content[i - 1];
         if (inStr) { if (c === inStr && prev !== '\\') inStr = null; continue; }
+        if (c === '/' && content[i + 1] === '/') { var nl = content.indexOf('\n', i); if (nl === -1) break; i = nl; continue; }
+        if (c === '/' && content[i + 1] === '*') { var endc = content.indexOf('*/', i + 2); if (endc === -1) break; i = endc + 1; continue; }
         if (c === '"' || c === "'" || c === '`') { inStr = c; continue; }
         if (c === open) depth++;
         else if (c === close) { depth--; if (depth < 0) return false; }
       }
       return depth === 0;
     }
+    function add(out, file, message, kind) { out.errors.push({ kind: kind || 'syntax', severity: 'error', file: file, message: message }); }
+    function warn(out, file, message, kind) { out.warnings.push({ kind: kind || 'style', severity: 'warning', file: file, message: message }); }
 
     function checkJs(path, content, out) {
-      if (!balanced(content, '{', '}')) out.errors.push({ file: path, message: 'Süslü parantez dengesiz ({ }).' });
-      if (!balanced(content, '(', ')')) out.errors.push({ file: path, message: 'Parantez dengesiz ( ).' });
-      if (!balanced(content, '[', ']')) out.errors.push({ file: path, message: 'Köşeli parantez dengesiz ([ ]).' });
-      // ES module DEĞİLSE derlenebilirlik testi
-      if (!/\bimport\s|\bexport\s|from\s+['"]/.test(content) && !/=>/.test(content) === false || true) {
-        if (!/\bimport\s|\bexport\s/.test(content) && ext(path) !== 'jsx') {
-          try { new Function(content); }
-          catch (e) { out.errors.push({ file: path, message: 'JS syntax hatası: ' + (e && e.message) }); }
-        }
+      if (!balanced(content, '{', '}')) add(out, path, 'Süslü parantez dengesiz ({ }).');
+      if (!balanced(content, '(', ')')) add(out, path, 'Parantez dengesiz ( ).');
+      if (!balanced(content, '[', ']')) add(out, path, 'Köşeli parantez dengesiz ([ ]).');
+      if (!/\bimport\s|\bexport\s/.test(content) && ext(path) === 'js') {
+        try { new Function(content); }
+        catch (e) { add(out, path, 'JS syntax hatası: ' + (e && e.message)); }
       }
     }
-
     function checkHtml(path, content, out) {
-      if (!/<!DOCTYPE html>/i.test(content)) out.warnings.push({ file: path, message: 'DOCTYPE eksik.' });
-      if (!/<html[\s>]/i.test(content) || !/<\/html>/i.test(content)) out.errors.push({ file: path, message: '<html> etiketi kapatılmamış.' });
-      if (/<head[\s>]/i.test(content) && !/<\/head>/i.test(content)) out.errors.push({ file: path, message: '<head> kapatılmamış.' });
-      if (/<body[\s>]/i.test(content) && !/<\/body>/i.test(content)) out.errors.push({ file: path, message: '<body> kapatılmamış.' });
+      if (!/<!DOCTYPE html>/i.test(content)) warn(out, path, 'DOCTYPE eksik.');
+      if (!/<html[\s>]/i.test(content) || !/<\/html>/i.test(content)) add(out, path, '<html> etiketi kapatılmamış.', 'html');
+      if (/<head[\s>]/i.test(content) && !/<\/head>/i.test(content)) add(out, path, '<head> kapatılmamış.', 'html');
+      if (/<body[\s>]/i.test(content) && !/<\/body>/i.test(content)) add(out, path, '<body> kapatılmamış.', 'html');
     }
-
     function checkCss(path, content, out) {
-      if (!balanced(content, '{', '}')) out.errors.push({ file: path, message: 'CSS blok parantezi dengesiz.' });
+      if (!balanced(content, '{', '}')) add(out, path, 'CSS blok parantezi dengesiz.', 'css');
     }
-
     function checkJson(path, content, out) {
-      try { JSON.parse(content); }
-      catch (e) { out.errors.push({ file: path, message: 'JSON parse hatası: ' + (e && e.message) }); }
+      try { JSON.parse(content); } catch (e) { add(out, path, 'JSON parse hatası: ' + (e && e.message), 'json'); }
     }
-
     function checkPython(path, content, out) {
-      if (/\t/.test(content) && / {4}/.test(content)) {
-        out.warnings.push({ file: path, message: 'Girintide sekme ve boşluk karışık.' });
-      }
+      if (/\t/.test(content) && / {4}/.test(content)) warn(out, path, 'Girintide sekme ve boşluk karışık.');
       content.split('\n').forEach(function (line, i) {
-        if (/^\s*(def |class |if |elif |for |while |with |try|except|else|finally)/.test(line)) {
+        if (/^\s*(def |class |if |elif |for |while |with |try|except|else|finally|async def )/.test(line)) {
           var trimmed = line.replace(/#.*$/, '').replace(/\s+$/, '');
-          if (trimmed && trimmed.slice(-1) !== ':' && trimmed.slice(-1) !== '\\') {
-            out.warnings.push({ file: path, message: 'Satır ' + (i + 1) + ': iki nokta ( : ) eksik olabilir.' });
+          if (trimmed && trimmed.slice(-1) !== ':' && trimmed.slice(-1) !== '\\' && trimmed.slice(-1) !== ',' && trimmed.slice(-1) !== '(') {
+            add(out, path, 'Satır ' + (i + 1) + ': iki nokta ( : ) eksik.', 'python');
           }
         }
       });
+      if (!balanced(content, '(', ')')) add(out, path, 'Parantez dengesiz ( ).', 'python');
     }
-
-    function checkCrossRefs(files, out) {
-      var paths = Object.keys(files);
-      paths.forEach(function (p) {
-        if (ext(p) !== 'html') return;
-        var html = files[p], re = /(?:href|src)\s*=\s*["']([^"']+)["']/gi, m;
-        while ((m = re.exec(html))) {
-          var ref = m[1];
-          if (/^https?:|^\/\/|^#|^data:|^mailto:/.test(ref)) continue;
-          if (ext(ref) !== 'css' && ext(ref) !== 'js') continue;
-          var clean = ref.replace(/^\.?\//, '');
-          var found = paths.some(function (pp) { return pp === ref || pp.replace(/^\.?\//, '') === clean; });
-          if (!found) out.warnings.push({ file: p, message: 'Referans verilen dosya bulunamadı: ' + ref });
-        }
-      });
-    }
-
     function run(files) {
-      var out = { ok: true, errors: [], warnings: [] };
+      var out = { ok: true, errors: [], warnings: [], checked: 0 };
       Object.keys(files).forEach(function (path) {
         var content = files[path] || '';
         var e = ext(path);
-        if (e === 'js' || e === 'mjs' || e === 'cjs') checkJs(path, content, out);
+        out.checked++;
+        if (e === 'js' || e === 'mjs' || e === 'cjs' || e === 'jsx') checkJs(path, content, out);
         else if (e === 'html' || e === 'htm') checkHtml(path, content, out);
         else if (e === 'css') checkCss(path, content, out);
         else if (e === 'json') checkJson(path, content, out);
         else if (e === 'py') checkPython(path, content, out);
       });
-      checkCrossRefs(files, out);
       out.ok = out.errors.length === 0;
       return out;
     }
-
-    return { run: run };
+    return { run: run, balanced: balanced };
   })();
 
   /* =================================================
-     12. FIXER
+     21. CODE REVIEWER (self-review: DOM, referans, import, placeholder)
   ================================================= */
 
-  var Fixer = (function () {
-    function fix(files, errors) {
-      var changed = false;
-      errors.forEach(function (err) {
-        var content = files[err.file];
-        if (content == null) return;
-        var before = content;
+  var CodeReviewer = (function () {
+    function htmlIds(files) {
+      var ids = {};
+      Object.keys(files).forEach(function (p) {
+        if (ext(p) !== 'html' && ext(p) !== 'htm') return;
+        var re = /\sid\s*=\s*["']([^"']+)["']/gi, m;
+        while ((m = re.exec(files[p]))) ids[m[1]] = p;
+      });
+      return ids;
+    }
+    function jsIdRefs(content) {
+      var refs = [], m;
+      var re1 = /getElementById\(\s*['"]([^'"]+)['"]\s*\)/g;
+      var re2 = /querySelector(?:All)?\(\s*['"]#([A-Za-z][\w-]*)['"]\s*\)/g;
+      while ((m = re1.exec(content))) if (refs.indexOf(m[1]) === -1) refs.push(m[1]);
+      while ((m = re2.exec(content))) if (refs.indexOf(m[1]) === -1) refs.push(m[1]);
+      return refs;
+    }
+    function resolveRel(fromPath, ref) {
+      var clean = ref.replace(/^\//, '');
+      if (!/^\.\.?\//.test(ref)) return clean;
+      var parts = fromPath.split('/'); parts.pop();
+      ref.split('/').forEach(function (seg) {
+        if (seg === '..') parts.pop(); else if (seg !== '.') parts.push(seg);
+      });
+      return parts.join('/');
+    }
 
-        if (/<body> kapatılmamış/.test(err.message) && !/<\/body>/i.test(content)) {
-          content = /<\/html>/i.test(content)
-            ? content.replace(/<\/html>/i, '</body>\n</html>')
-            : content + '\n</body>';
-        }
-        if (/<head> kapatılmamış/.test(err.message) && !/<\/head>/i.test(content) && /<body[\s>]/i.test(content)) {
-          content = content.replace(/<body[\s>]/i, function (m) { return '</head>\n' + m; });
-        }
-        if (/<html> etiketi kapatılmamış/.test(err.message) && !/<\/html>/i.test(content)) {
-          content = content + '\n</html>';
-        }
-        if (/DOCTYPE eksik/.test(err.message) && !/<!DOCTYPE/i.test(content)) {
-          content = '<!DOCTYPE html>\n' + content;
-        }
-        // Dengesiz süslü/parantez: eksik kapanışları sona ekle (kaba ama etkili)
-        if (/Süslü parantez dengesiz/.test(err.message)) {
-          var openB = (content.match(/{/g) || []).length, closeB = (content.match(/}/g) || []).length;
-          while (closeB < openB) { content += '\n}'; closeB++; }
-        }
-        if (/Parantez dengesiz/.test(err.message)) {
-          var openP = (content.match(/\(/g) || []).length, closeP = (content.match(/\)/g) || []).length;
-          while (closeP < openP) { content += ')'; closeP++; }
-        }
+    function review(files, analysis) {
+      var issues = [];
+      function issue(sev, kind, file, message, detail) {
+        issues.push({ severity: sev, kind: kind, file: file, message: message, detail: detail || null });
+      }
+      var paths = Object.keys(files);
+      var ids = htmlIds(files);
+      var hasHtml = paths.some(function (p) { return ext(p) === 'html'; });
 
-        if (content !== before) {
-          files[err.file] = content;
-          changed = true;
-          bus.emit('fix:completed', { file: err.file });
+      paths.forEach(function (p) {
+        var c = files[p] || '', e = ext(p);
+        if (/\b(TODO|FIXME)\b|ADD CODE HERE|IMPLEMENT LATER|PLACEHOLDER/.test(c)) {
+          issue('warning', 'placeholder', p, 'Placeholder / yarım kod işareti bulundu.');
+        }
+        if (e === 'js' && hasHtml && !/\bimport\s/.test(c)) {
+          jsIdRefs(c).forEach(function (id) {
+            if (!ids[id]) issue('error', 'dom-selector', p, '`#' + id + '` JS içinde kullanılıyor fakat HTML\'de bu id yok.', { id: id });
+          });
+          if (/JSON\.parse\(\s*localStorage/.test(c) && !/try\s*{[\s\S]*JSON\.parse\(\s*localStorage/.test(c)) {
+            issue('warning', 'localstorage', p, 'localStorage verisi try/catch olmadan JSON.parse ediliyor.');
+          }
+        }
+        if (e === 'html') {
+          var re = /(?:href|src)\s*=\s*["']([^"']+)["']/gi, m;
+          while ((m = re.exec(c))) {
+            var ref = m[1];
+            if (/^https?:|^\/\/|^#|^data:|^mailto:/.test(ref)) continue;
+            if (['css', 'js', 'jsx'].indexOf(ext(ref)) === -1) continue;
+            var target = resolveRel(p, ref);
+            if (!paths.some(function (pp) { return pp === target; })) {
+              issue('error', 'broken-ref', p, 'Referans verilen dosya bulunamadı: ' + ref, { ref: ref, refExt: ext(ref) });
+            }
+          }
+          var headPart = (c.split(/<\/head>/i)[0] || '');
+          if (/<script\s+src=/i.test(headPart) && !/defer|type=["']module/i.test(headPart)) {
+            issue('warning', 'script-order', p, 'Script <head> içinde defer olmadan yükleniyor.');
+          }
+        }
+        if (e === 'jsx' || (e === 'js' && /\bimport\s/.test(c))) {
+          var ri = /import\s+(?:[\w{}\s,*]+\s+from\s+)?['"](\.{1,2}\/[^'"]+)['"]/g, mi;
+          while ((mi = ri.exec(c))) {
+            var tgt = resolveRel(p, mi[1]);
+            var cands = [tgt, tgt + '.js', tgt + '.jsx', tgt + '/index.js', tgt + '/index.jsx'];
+            if (!cands.some(function (x) { return files[x] != null; })) {
+              issue('error', 'missing-import', p, 'Import edilen dosya yok: ' + mi[1], { ref: mi[1] });
+            }
+          }
+        }
+        if (e === 'py') {
+          var needsDiscord = /^\s*import discord|^\s*from discord/m.test(c);
+          if (needsDiscord && files['requirements.txt'] != null && !/discord/.test(files['requirements.txt'])) {
+            issue('error', 'dependency', p, 'discord import ediliyor fakat requirements.txt içinde yok.', { dep: 'discord.py' });
+          }
         }
       });
-      return changed;
+      return issues;
+    }
+    return { review: review, jsIdRefs: jsIdRefs, htmlIds: htmlIds };
+  })();
+
+  /* =================================================
+     22. DEBUGGER (hata açıklama) + AUTO FIXER
+  ================================================= */
+
+  var Debugger = (function () {
+    function explain(err) {
+      var k = err.kind, m = err.message || '';
+      if (k === 'dom-selector') return 'JS, HTML\'de olmayan bir elemana erişiyor; çalışma anında null hatası verir.';
+      if (k === 'broken-ref') return 'HTML var olmayan bir dosyayı yüklüyor; stil/script uygulanmaz.';
+      if (k === 'missing-import') return 'Import edilen modül workspace\'te yok; derleme başarısız olur.';
+      if (k === 'dependency') return 'Kullanılan paket bağımlılık listesinde yok; kurulumda eksik kalır.';
+      if (/parantez/i.test(m)) return 'Açılan bir blok kapatılmamış; dosya parse edilemez.';
+      if (/<\w+>/.test(m)) return 'HTML iskeletinde kapanmamış etiket var.';
+      if (/iki nokta/.test(m)) return 'Python blok satırı ":" ile bitmeli.';
+      return 'Statik doğrulama hatası.';
+    }
+    return { explain: explain };
+  })();
+
+  var AutoFixer = (function () {
+    function fixOne(files, err) {
+      var content = files[err.file];
+      if (content == null) return null;
+      var before = content, m = err.message || '';
+
+      if (err.kind === 'dom-selector' && err.detail) {
+        var htmlP = firstByExt(files, ['html', 'htm']);
+        if (htmlP) {
+          var el = '  <div id="' + err.detail.id + '"></div>\n';
+          var h = files[htmlP];
+          h = /<script/i.test(h) ? h.replace(/(\s*)<script/i, '\n' + el + '$1<script') : h.replace(/<\/body>/i, el + '</body>');
+          files[htmlP] = h;
+          return { file: htmlP, action: '#' + err.detail.id + ' elemanı HTML\'e eklendi' };
+        }
+        return null;
+      }
+      if (err.kind === 'broken-ref' && err.detail) {
+        var cand = Object.keys(files).filter(function (p) { return ext(p) === err.detail.refExt && p !== err.file; })[0];
+        if (cand) {
+          content = content.split(err.detail.ref).join(cand);
+          files[err.file] = content;
+          return { file: err.file, action: err.detail.ref + ' referansı ' + cand + ' ile değiştirildi' };
+        }
+        return null;
+      }
+      if (err.kind === 'dependency' && err.detail && files['requirements.txt'] != null) {
+        files['requirements.txt'] = files['requirements.txt'].replace(/\s*$/, '\n') + err.detail.dep + '\n';
+        return { file: 'requirements.txt', action: err.detail.dep + ' bağımlılığı eklendi' };
+      }
+      if (/<body> kapatılmamış/.test(m) && !/<\/body>/i.test(content)) {
+        content = /<\/html>/i.test(content) ? content.replace(/<\/html>/i, '</body>\n</html>') : content + '\n</body>';
+      }
+      if (/<head> kapatılmamış/.test(m) && !/<\/head>/i.test(content) && /<body[\s>]/i.test(content)) {
+        content = content.replace(/<body[\s>]/i, function (x) { return '</head>\n' + x; });
+      }
+      if (/<html> etiketi kapatılmamış/.test(m) && !/<\/html>/i.test(content)) content = content + '\n</html>';
+      if (/DOCTYPE eksik/.test(m) && !/<!DOCTYPE/i.test(content)) content = '<!DOCTYPE html>\n' + content;
+      if (/Süslü parantez dengesiz|CSS blok parantezi dengesiz/.test(m)) {
+        var ob = (content.match(/{/g) || []).length, cb = (content.match(/}/g) || []).length;
+        while (cb < ob) { content += '\n}'; cb++; }
+      }
+      if (/Parantez dengesiz/.test(m)) {
+        var op = (content.match(/\(/g) || []).length, cp = (content.match(/\)/g) || []).length;
+        while (cp < op) { content += ')'; cp++; }
+      }
+      if (/Köşeli parantez dengesiz/.test(m)) {
+        var oq = (content.match(/\[/g) || []).length, cq = (content.match(/]/g) || []).length;
+        while (cq < oq) { content += ']'; cq++; }
+      }
+      var line = /Satır (\d+): iki nokta/.exec(m);
+      if (line) {
+        var lines = content.split('\n'), idx = +line[1] - 1;
+        if (lines[idx] != null) { lines[idx] = lines[idx].replace(/\s*$/, ':'); content = lines.join('\n'); }
+      }
+      if (content !== before) { files[err.file] = content; return { file: err.file, action: m }; }
+      return null;
+    }
+    function fix(files, errors) {
+      var applied = [];
+      errors.forEach(function (err) {
+        var r = fixOne(files, err);
+        if (r) applied.push(Object.assign({ explanation: Debugger.explain(err), error: err.message }, r));
+      });
+      return applied;
     }
     return { fix: fix };
   })();
 
   /* =================================================
-     13. TESTER (özellik bazlı statik testler)
+     23. DEPENDENCY ANALYZER
   ================================================= */
 
-  var Tester = (function () {
-    function run(analysis, files) {
-      var tests = [];
-      function t(name, cond) { tests.push({ name: name, passed: !!cond }); }
-
-      var allJs = Object.keys(files).filter(function (p) { return ext(p) === 'js'; })
-        .map(function (p) { return files[p]; }).join('\n');
-      var allCss = Object.keys(files).filter(function (p) { return ext(p) === 'css'; })
-        .map(function (p) { return files[p]; }).join('\n');
-      var hasHtml = Object.keys(files).some(function (p) { return ext(p) === 'html'; });
-
-      if (analysis.projectType === 'todo') {
-        t('Görev ekleme fonksiyonu var', /addTodo|todos\.push/.test(allJs));
-        t('Silme fonksiyonu var', /function remove|splice\(/.test(allJs));
-        t('Tamamlandı (toggle) durumu var', /\.done|toggle/.test(allJs));
-        t('localStorage kullanılıyor', /localStorage/.test(allJs));
-        t('Boş görev engelleniyor', /trim\(\)/.test(allJs) && /if\s*\(!/.test(allJs));
-        t('Enter ile ekleme var', /keydown|'Enter'|"Enter"/.test(allJs));
-        t('Responsive CSS var', /@media/.test(allCss));
-      } else if (analysis.projectType === 'calculator') {
-        t('Rakam girişi var', /data-num|append\(/.test(allJs));
-        t('Hesaplama fonksiyonu var', /equals|Function\(/.test(allJs));
-        t('Temizleme (clear) var', /clearAll|clear/.test(allJs));
-      } else if (analysis.projectType === 'login') {
-        t('Form doğrulama var', /validate/.test(allJs));
-        t('E-posta kontrolü var', /@|indexOf/.test(allJs));
-        t('Şifre kontrolü var', /length\s*<\s*6|minlength/.test(allJs + Object.keys(files).map(function (p) { return files[p]; }).join('')));
-      } else {
-        t('HTML çıktısı var', hasHtml || analysis.techKind !== 'web');
-        t('JS/kaynak üretildi', Object.keys(files).length > 0);
+  var DependencyAnalyzer = (function () {
+    var REASONS = {
+      react: 'UI bileşen kütüphanesi', 'react-dom': 'React bileşenlerini DOM\'a render etme',
+      vite: 'Geliştirme sunucusu ve bundler', '@vitejs/plugin-react': 'Vite için JSX/React desteği',
+      express: 'HTTP sunucusu', jsonwebtoken: 'JWT kimlik doğrulama', pg: 'PostgreSQL istemcisi',
+      'discord.py': 'Discord API istemcisi', discord: 'Discord API istemcisi', 'python-dotenv': '.env dosyasından token okuma',
+      flask: 'Python web sunucusu', requests: 'HTTP istekleri',
+    };
+    function analyze(files) {
+      var deps = {};
+      function add(name, file) {
+        if (!deps[name]) deps[name] = { name: name, reason: REASONS[name] || 'Projede kullanılan paket', files: [] };
+        if (file && deps[name].files.indexOf(file) === -1) deps[name].files.push(file);
       }
+      Object.keys(files).forEach(function (p) {
+        var c = files[p] || '';
+        if (p === 'package.json') {
+          try { var pkg = JSON.parse(c); Object.keys(Object.assign({}, pkg.dependencies || {}, pkg.devDependencies || {})).forEach(function (d) { add(d, p); }); } catch (e) { /* validator raporlar */ }
+        }
+        if (p === 'requirements.txt') {
+          c.split('\n').forEach(function (l) { var n = l.trim().split(/[=<>~\s]/)[0]; if (n && n[0] !== '#') add(n, p); });
+        }
+        if (['js', 'jsx', 'mjs'].indexOf(ext(p)) !== -1) {
+          var re = /(?:from\s+|require\()\s*['"]([^'"./][^'"]*)['"]/g, m;
+          while ((m = re.exec(c))) add(m[1].split('/')[0] === m[1] ? m[1] : m[1], p);
+        }
+      });
+      return Object.keys(deps).map(function (k) { return deps[k]; });
+    }
+    return { analyze: analyze };
+  })();
 
+  /* =================================================
+     24. TEST RUNNER (proje tipine göre statik test stratejisi)
+  ================================================= */
+
+  var TestRunner = (function () {
+    function run(analysis, files, reviewIssues) {
+      var tests = [];
+      function t(name, cond, kind) { tests.push({ name: name, passed: !!cond, status: cond ? 'PASS' : 'FAIL', kind: kind || 'feature' }); }
+      var paths = Object.keys(files);
+      function join(exts) { return paths.filter(function (p) { return exts.indexOf(ext(p)) !== -1; }).map(function (p) { return files[p]; }).join('\n'); }
+      var js = join(['js']), css = join(['css']), html = join(['html', 'htm']), all = paths.map(function (p) { return files[p]; }).join('\n');
+      var v = Validator.run(files);
+      var domIssues = (reviewIssues || []).filter(function (i) { return i.kind === 'dom-selector'; });
+      var refIssues = (reviewIssues || []).filter(function (i) { return i.kind === 'broken-ref' || i.kind === 'missing-import'; });
+      var kind = analysis.techKind;
+
+      t('Statik sözdizimi doğrulaması', v.ok, 'static');
+
+      if (kind === 'web') {
+        t('DOM tutarlılığı (JS selector → HTML id)', domIssues.length === 0, 'dom');
+        t('Dosya referansları (CSS/JS) çözülüyor', refIssues.length === 0, 'static');
+        if (analysis.projectType === 'todo') {
+          t('TEST: görev ekleme', /addTodo|todos\.push/.test(js));
+          t('TEST: görev silme', /function remove|splice\(|filter\(/.test(js));
+          t('TEST: görev tamamlama', /\.done|toggle|completed/.test(js));
+          t('TEST: localStorage save', /localStorage\.setItem/.test(js));
+          t('TEST: localStorage restore', /localStorage\.getItem/.test(js) && /JSON\.parse/.test(js));
+          t('TEST: boş görev engelleme', /trim\(\)/.test(js));
+        } else if (analysis.projectType === 'calculator') {
+          t('TEST: rakam girişi', /data-num|append\(/.test(js));
+          t('TEST: hesaplama', /equals|Function\(|eval|calculate/.test(js));
+          t('TEST: temizleme', /clearAll|clear/.test(js));
+        } else if (analysis.projectType === 'login') {
+          t('TEST: form doğrulama', /validate/.test(js));
+          t('TEST: e-posta kontrolü', /@|indexOf|test\(/.test(js));
+          t('TEST: şifre kontrolü', /length\s*<\s*6|minlength/.test(js + html));
+        }
+        if (/@media/.test(css) || analysis.requirements && analysis.requirements.uiRequirements.indexOf('Responsive tasarım') !== -1) {
+          t('TEST: responsive CSS (@media)', /@media/.test(css));
+        }
+        if (/theme-toggle/.test(html)) {
+          t('TEST: dark mode butonu', /id=["']theme-toggle["']/.test(html));
+          t('TEST: dark mode stilleri', /theme-dark/.test(css));
+          t('TEST: tema tercihi kaydediliyor', /bilalai-theme/.test(js));
+        }
+        if (files['login.html'] != null) {
+          t('TEST: login sayfası mevcut', true);
+          t('TEST: login doğrulaması', /validate/.test(files['login.js'] || ''));
+        }
+      } else if (kind === 'react') {
+        t('Import tutarlılığı', refIssues.length === 0, 'static');
+        t('package.json geçerli', (function () { try { JSON.parse(files['package.json'] || ''); return true; } catch (e) { return false; } })(), 'static');
+        t('react bağımlılığı tanımlı', /"react"/.test(files['package.json'] || ''), 'static');
+        t('Root bileşeni render ediliyor', /createRoot\(/.test(all));
+        t('Bileşenler export ediliyor', /export default/.test(all));
+      } else if (kind === 'python') {
+        var py = join(['py']);
+        t('Fonksiyon/komut tanımları mevcut', /\bdef\s+\w+|async def/.test(py));
+        t('Importlar bağımlılık listesiyle uyumlu', !(reviewIssues || []).some(function (i) { return i.kind === 'dependency'; }), 'static');
+        t('Token koda gömülmemiş (env)', !/TOKEN\s*=\s*['"][A-Za-z0-9._-]{20,}['"]/.test(py));
+        t('Giriş noktası (__main__ / run) var', /__main__|\.run\(/.test(py));
+      } else if (kind === 'node') {
+        t('package.json geçerli', (function () { try { JSON.parse(files['package.json'] || ''); return true; } catch (e) { return false; } })(), 'static');
+        t('Giriş dosyası mevcut', !!files['index.js']);
+      }
       var passed = tests.filter(function (x) { return x.passed; }).length;
-      return { passed: passed, failed: tests.length - passed, total: tests.length, tests: tests };
+      return { passed: passed, failed: tests.length - passed, total: tests.length, tests: tests,
+        mode: 'static', note: 'Runtime yürütme yok; testler statik analizdir.' };
     }
     return { run: run };
   })();
 
+  // Geriye dönük uyumluluk
+  var Fixer = { fix: function (files, errors) { return AutoFixer.fix(files, errors).length > 0; } };
+  var Tester = TestRunner;
+
   /* =================================================
-     14. AGENT CORE (sync + async ortak adımlar)
+     25. PLANNER + TASK MANAGER (dinamik, karmaşıklığa göre)
+  ================================================= */
+
+  var Planner = (function () {
+    function build(analysis, generatedFiles) {
+      var tasks = [], cx = analysis.complexity;
+      function add(title, type, extra) { tasks.push(Object.assign({ id: uid('t'), title: title, type: type }, extra || {})); }
+      add('Talebi analiz et', 'analyze');
+      add('Workspace\'i analiz et', 'workspace');
+      if (cx === 'complex' || cx === 'very-complex') add('Gereksinimleri çıkar', 'requirements');
+      if (cx === 'very-complex') add('Mimariyi ve modülleri tasarla', 'architecture');
+
+      if (analysis.intent === 'create') {
+        add(cx === 'simple' ? 'Dosyaları hazırla' : 'Proje yapısını oluştur', 'scaffold');
+        (generatedFiles || analysis.files).forEach(function (f) { add(f + ' oluştur', 'create-file', { path: f }); });
+      } else if (analysis.intent === 'modify') {
+        if (!analysis.context.modifications.length) add('Değişiklik kapsamını belirle', 'review');
+        analysis.context.modifications.forEach(function (m) { add(m.title, 'edit', { mod: m.kind }); });
+      } else {
+        add('Mevcut kodu incele ve hataları tespit et', 'review');
+      }
+      if (cx === 'complex' || cx === 'very-complex' || analysis.techKind === 'python' || analysis.techKind === 'react') {
+        add('Bağımlılıkları analiz et', 'dependencies');
+      }
+      add('Self-check yap ve hataları düzelt', 'verify-fix');
+      add('Testleri çalıştır (statik)', 'test');
+      if (analysis.requiresPreview) add('Preview hazırla', 'preview');
+      else add('Çalıştırma notlarını hazırla', 'notes');
+      if (cx !== 'simple') add('Final raporu hazırla', 'report');
+      return tasks;
+    }
+    return { build: build };
+  })();
+
+  var TaskManager = (function () {
+    function init(tasks) {
+      STATE.tasks = tasks.map(function (t) {
+        return { id: t.id, title: t.title, type: t.type, path: t.path || null, mod: t.mod || null,
+          status: 'pending', startedAt: null, finishedAt: null, error: null };
+      });
+      STATE.plan = STATE.tasks.map(function (t) { return t.title; });
+      return STATE.tasks;
+    }
+    function find(id) {
+      for (var i = 0; i < STATE.tasks.length; i++) if (STATE.tasks[i].id === id) return STATE.tasks[i];
+      return null;
+    }
+    function set(id, status, extra) {
+      var t = find(id);
+      if (!t) return null;
+      t.status = status;
+      if (status === 'running') t.startedAt = Date.now(); else t.finishedAt = Date.now();
+      if (extra && extra.error) t.error = extra.error;
+      var p = progress();
+      var meta = { taskId: t.id, title: t.title, status: status, progress: p.completed + '/' + p.total, task: clone(t) };
+      if (status === 'running') emit('task:start', '▶ ' + t.title, meta, 'task:started');
+      else if (status === 'completed') emit('task:complete', '✓ ' + t.title + ' (' + meta.progress + ')', meta, 'task:completed');
+      else if (status === 'failed') emit('task:fail', '✗ ' + t.title, Object.assign(meta, { reason: extra && extra.error }), 'task:failed');
+      else if (status === 'skipped') emit('task:skip', '↷ ' + t.title, meta);
+      return t;
+    }
+    function start(id) { return set(id, 'running'); }
+    function complete(id) { return set(id, 'completed'); }
+    function fail(id, reason) { return set(id, 'failed', { error: reason }); }
+    function skip(id) { return set(id, 'skipped'); }
+    function progress() {
+      var total = STATE.tasks.length;
+      var done = STATE.tasks.filter(function (t) { return t.status === 'completed' || t.status === 'skipped'; }).length;
+      return { completed: done, total: total, percentage: total ? Math.round((done / total) * 100) : 0 };
+    }
+    function render() {
+      var sym = { pending: '[ ]', running: '[▶]', completed: '[x]', failed: '[✗]', skipped: '[-]' };
+      var p = progress();
+      var lines = ['**' + p.completed + '/' + p.total + '** görev'];
+      STATE.tasks.forEach(function (t) { lines.push('- ' + (sym[t.status] || '[ ]') + ' ' + t.title); });
+      return lines.join('\n');
+    }
+    return { init: init, find: find, start: start, complete: complete, fail: fail, skip: skip, progress: progress, render: render };
+  })();
+
+  /* =================================================
+     26. PREVIEW MANAGER
+  ================================================= */
+
+  var PreviewManager = (function () {
+    function prepare(ctx) {
+      var a = ctx.analysis;
+      if (a.techKind === 'web') {
+        var pv = ctx.preview.previewProject(filesMapFromWorkspace(ctx.workspace));
+        return pv || { available: false, reason: 'preview_failed' };
+      }
+      return { available: false, reason: 'browser_runtime_not_available',
+        note: a.techKind + ' projesi tarayıcıda doğrudan çalıştırılamaz; preview oluşturulmadı.' };
+    }
+    return { prepare: prepare };
+  })();
+
+  /* =================================================
+     27. AGENT CORE — adımlar
   ================================================= */
 
   function pickThinking(complexity) {
     return randBetween(CONFIG.thinkingMs[complexity] || CONFIG.thinkingMs.medium);
   }
 
-  function recordFile(workspace, path, content) {
-    var existed = workspace.exists(path);
-    if (existed) { workspace.updateFile(path, content); }
-    else { workspace.writeFile(path, content); }
+  // Geriye dönük uyumluluk
+  function recordFile(workspace, path, content, reason) { return WorkspaceManager.write(workspace, path, content, reason || 'Dosya yazıldı'); }
 
-    var entry = { path: path, content: content, language: langOf(path), status: existed ? 'updated' : 'created' };
-    var idx = -1;
-    for (var i = 0; i < STATE.files.length; i++) { if (STATE.files[i].path === path) { idx = i; break; } }
-    if (idx >= 0) STATE.files[idx] = entry; else STATE.files.push(entry);
+  function runVerifyFix(ctx, title) {
+    var ws = ctx.workspace;
+    setStatus('verifying', title);
+    emit('validation:start', '🔍 Self-check başlatıldı (statik doğrulama + kod incelemesi).', {});
+    var files = filesMapFromWorkspace(ws);
 
-    bus.emit(existed ? 'file:updated' : 'file:created', { path: path, language: entry.language });
-    return entry;
+    function check() {
+      var v = Validator.run(files);
+      var r = CodeReviewer.review(files, ctx.analysis);
+      return {
+        errors: v.errors.concat(r.filter(function (i) { return i.severity === 'error'; })),
+        warnings: v.warnings.concat(r.filter(function (i) { return i.severity === 'warning'; })),
+        review: r, checked: v.checked,
+      };
+    }
+    var res = check();
+    STATE.validation = { initialErrors: res.errors.length, rounds: [] };
+    STATE.issues = clone(res.errors);
+    emit('validation:complete', res.errors.length ? '🛠 ' + res.errors.length + ' hata bulundu.' : '✅ Self-check temiz.',
+      { ok: res.errors.length === 0, errors: res.errors.length, warnings: res.warnings.length },
+      res.errors.length ? 'validation:failed' : 'validation:passed');
+
+    var attempt = 0;
+    while (res.errors.length && attempt < CONFIG.maxFixAttempts) {
+      attempt++;
+      STATE.fixAttempts = attempt;
+      setStatus('fixing', title);
+      emit('fix:start', '🛠 Düzeltme denemesi ' + attempt + '/' + CONFIG.maxFixAttempts, { attempt: attempt, errors: res.errors.length });
+      var applied = AutoFixer.fix(files, res.errors);
+      applied.forEach(function (fx) {
+        WorkspaceManager.write(ws, fx.file, files[fx.file], 'Auto-fix (deneme ' + attempt + '): ' + fx.action);
+      });
+      STATE.fixes.push({ attempt: attempt, detected: res.errors.map(function (e) { return e.file + ': ' + e.message; }), applied: applied });
+      emit('fix:complete', '🔁 Deneme ' + attempt + ': ' + applied.length + ' düzeltme uygulandı, tekrar doğrulanıyor.', { attempt: attempt, applied: applied.length }, 'fix:completed');
+      var before = res.errors.length;
+      res = check();
+      STATE.validation.rounds.push({ attempt: attempt, before: before, after: res.errors.length });
+      emit('validation:complete', res.errors.length ? '⚠️ Kalan hata: ' + res.errors.length : '✅ Yeniden doğrulama geçti.',
+        { ok: res.errors.length === 0, attempt: attempt, errors: res.errors.length }, res.errors.length ? 'validation:failed' : 'validation:passed');
+      if (!applied.length) break;
+    }
+    STATE.remainingIssues = clone(res.errors);
+    STATE.warnings = clone(res.warnings);
+    STATE.testStatus = res.errors.length ? 'failed' : 'passed';
+    ctx.review = res.review;
+    ctx.files = files;
+    ctx.checkedFiles = res.checked;
   }
 
-  // Bir plan adımını yürütür (senkron). ctx state'i taşır.
   function runStep(task, ctx) {
-    var analysis = ctx.analysis, workspace = ctx.workspace;
-
+    var a = ctx.analysis, ws = ctx.workspace;
     switch (task.type) {
       case 'analyze': {
         setStatus('analyzing', task.title);
-        bus.emit('task:analyzing', {});
-        var existing = workspace.listFiles();
-        if (existing.length) {
-          STATE.changes.push('Mevcut ' + existing.length + ' dosya incelendi ve korunuyor.');
+        emit('analysis:complete', '🧠 Talep analiz edildi: ' + a.projectKind + ' / ' + a.frameworkName + ' / ' + a.complexity + '.', {
+          projectType: a.projectType, framework: a.frameworkName, complexity: a.complexity, intent: a.intent, files: a.files });
+        note('Mod: ' + (a.intent === 'create' ? 'yeni proje' : a.intent === 'modify' ? 'mevcut projede değişiklik' : 'hata ayıklama') + ' — ' + a.context.reason);
+        if (a.needsResearch) {
+          note(ctx.web.isAvailable() ? 'Dokümantasyon araştırması için web adapteri mevcut.'
+            : 'Web/dokümantasyon adapteri bağlı değil; araştırma yapılmadı, yerleşik bilgi kullanıldı.');
         }
-        STATE.changes.push('Amaç: ' + analysis.projectType + ' (' + analysis.technologies.join('/') + ').');
+        break;
+      }
+      case 'workspace': {
+        setStatus('analyzing', task.title);
+        var pr = a.project;
+        note(pr.fileCount ? 'Workspace: ' + pr.fileCount + ' dosya okundu (framework: ' + (pr.framework || '-') + ', giriş: ' + (pr.entry || '-') + ').'
+          : 'Workspace boş; yeni proje oluşturulacak.');
+        break;
+      }
+      case 'requirements': {
+        setStatus('planning', task.title);
+        note('Gereksinimler: ' + a.requirements.functionalRequirements.length + ' fonksiyonel, ' + a.requirements.implicitRequirements.length + ' örtük.');
+        break;
+      }
+      case 'architecture': {
+        setStatus('planning', task.title);
+        note('Mimari: istek çok kapsamlı; bu tarayıcı motoru çekirdek modülü (' + a.files.join(', ') + ') üretir, kalan servisler raporda listelenir.');
         break;
       }
       case 'scaffold': {
         setStatus('scaffolding', task.title);
-        // Tüm içeriği bir kez üret; create-file adımları tek tek yazacak.
-        ctx.generated = CodeGenerator.generate(analysis);
-        STATE.changes.push(analysis.projectType + ' için ' + Object.keys(ctx.generated).length + ' dosyalık yapı hazırlandı.');
+        if (!ctx.generated) ctx.generated = CodeGenerator.generate(a);
         break;
       }
       case 'create-file': {
         setStatus('implementing', task.title);
-        if (!ctx.generated) ctx.generated = CodeGenerator.generate(analysis);
-        var path = task.path;
-        var content = ctx.generated[path];
+        if (!ctx.generated) ctx.generated = CodeGenerator.generate(a);
+        var content = ctx.generated[task.path];
         if (content == null) {
-          // Planlanan dosya üretilemedi -> boş yerine anlamlı bir hata durumu
-          STATE.errors.push({ file: path, message: 'Dosya içeriği üretilemedi.' });
-          throw new Error('İçerik üretilemedi: ' + path);
+          var err = new Error('İçerik üretilemedi: ' + task.path);
+          recordError(err, { type: 'GenerationError', task: task.title, file: task.path });
+          throw err;
         }
-        recordFile(workspace, path, content);
+        WorkspaceManager.write(ws, task.path, content, a.projectType + ' projesi için ' + task.path + ' üretildi');
         break;
       }
-      case 'verify-fix': {
+      case 'edit': {
+        setStatus('implementing', task.title);
+        var r = CodeEditor.apply(task.mod, ws, a);
+        note((r.ok ? '' : '⚠️ ') + r.message);
+        if (!r.ok) STATE.warnings.push({ kind: 'edit', severity: 'warning', file: null, message: r.message });
+        break;
+      }
+      case 'review': {
         setStatus('verifying', task.title);
-        bus.emit('validation:start', {});
-        var files = filesMapFromWorkspace(workspace);
-        var result = Validator.run(files);
-        STATE.errors = result.errors.slice();
-        STATE.warnings = result.warnings.slice();
-
-        if (result.ok) {
-          STATE.testStatus = 'passed';
-          bus.emit('validation:passed', { warnings: result.warnings.length });
-        } else {
-          bus.emit('validation:failed', { errors: result.errors.length });
-          setStatus('fixing', task.title);
-          var attempt = 0, passed = false;
-          while (attempt < CONFIG.maxFixAttempts) {
-            attempt++;
-            STATE.fixAttempts = attempt;
-            bus.emit('fix:start', { attempt: attempt });
-            var didFix = Fixer.fix(files, result.errors);
-            // Değişenleri workspace + state'e yansıt
-            Object.keys(files).forEach(function (p) { recordFile(workspace, p, files[p]); });
-            result = Validator.run(files);
-            STATE.errors = result.errors.slice();
-            STATE.warnings = result.warnings.slice();
-            if (result.ok) { passed = true; break; }
-            if (!didFix) break; // otomatik düzeltilecek bir şey kalmadı
-          }
-          STATE.testStatus = passed ? 'passed' : 'failed';
-          if (passed) STATE.changes.push('Doğrulama hataları ' + STATE.fixAttempts + ' denemede düzeltildi.');
-          else STATE.changes.push('Bazı hatalar otomatik düzeltilemedi (state.errors).');
-          bus.emit(passed ? 'validation:passed' : 'validation:failed', { afterFix: true });
+        var files = filesMapFromWorkspace(ws);
+        if (!Object.keys(files).length) { note('Workspace boş; incelenecek kod bulunamadı.'); break; }
+        var found = Validator.run(files).errors.concat(CodeReviewer.review(files, a).filter(function (i) { return i.severity === 'error'; }));
+        STATE.detected = found.map(function (e) { return { file: e.file, message: e.message, explanation: Debugger.explain(e) }; });
+        note('İnceleme: ' + Object.keys(files).length + ' dosya tarandı, ' + found.length + ' hata tespit edildi.');
+        if (a.intent === 'modify' && !a.context.modifications.length) {
+          note('Bu değişiklik isteği için otomatik düzenleyici eşleşmedi; mevcut kod korunarak yalnızca inceleme yapıldı.');
         }
-
-        // Özellik bazlı testler
-        if (analysis.requiresTesting) {
-          var testResult = Tester.run(analysis, files);
-          STATE.tests = testResult.tests.slice();
-          ctx.testResult = testResult;
-        }
+        break;
+      }
+      case 'dependencies': {
+        setStatus('verifying', task.title);
+        STATE.dependencies = DependencyAnalyzer.analyze(filesMapFromWorkspace(ws));
+        break;
+      }
+      case 'verify-fix': runVerifyFix(ctx, task.title); break;
+      case 'test': {
+        setStatus('verifying', task.title);
+        emit('test:start', '🧪 Statik testler çalışıyor...', {});
+        var files2 = ctx.files || filesMapFromWorkspace(ws);
+        ctx.testResult = TestRunner.run(a, files2, CodeReviewer.review(files2, a));
+        STATE.tests = ctx.testResult.tests.slice();
+        if (!STATE.dependencies.length) STATE.dependencies = DependencyAnalyzer.analyze(files2);
+        emit('test:complete', '🧪 ' + ctx.testResult.passed + '/' + ctx.testResult.total + ' test geçti.', {
+          passed: ctx.testResult.passed, failed: ctx.testResult.failed, total: ctx.testResult.total });
         break;
       }
       case 'preview': {
         setStatus('previewing', task.title);
-        bus.emit('preview:start', {});
-        if (analysis.techKind === 'web') {
-          var pv = ctx.preview.previewProject(filesMapFromWorkspace(workspace));
-          STATE.preview = pv;
-          if (pv && pv.available) bus.emit('preview:ready', { url: pv.url, title: pv.title });
-        } else {
-          // React/Node/Python: tarayıcıda doğrudan çalışmaz -> dürüst durum
-          STATE.preview = { available: false, reason: 'browser_runtime_not_available',
-            note: analysis.techKind + ' projesi için tarayıcı preview runtime bağlı değil.' };
+        emit('preview:start', '👀 Preview hazırlanıyor...', {});
+        STATE.preview = PreviewManager.prepare(ctx);
+        if (STATE.preview && STATE.preview.available) {
+          emit('preview:create', '👀 Preview gerçek workspace dosyalarından hazırlandı.', { url: STATE.preview.url, title: STATE.preview.title }, 'preview:ready');
         }
         break;
       }
       case 'notes': {
         setStatus('implementing', task.title);
         STATE.executionAvailable = false;
-        STATE.changes.push('Çalıştırma adapteri bağlı değil; statik self-check gerçekleştirildi.');
+        STATE.preview = PreviewManager.prepare(ctx);
+        note('Runtime yürütme adapteri bağlı değil; yalnızca statik doğrulama yapıldı.');
         break;
       }
-      default:
-        break;
+      case 'report': setStatus('previewing', task.title); break;
+      default: break;
     }
   }
 
-  function filesMapFromWorkspace(workspace) {
-    var map = {};
-    workspace.listFiles().forEach(function (p) { map[p] = workspace.readFile(p); });
-    return map;
-  }
+  /* =================================================
+     28. FINAL REPORTER
+  ================================================= */
+
+  var FinalReporter = (function () {
+    var ACTION_TR = { create: 'CREATE', update: 'EDIT', delete: 'DELETE', rename: 'RENAME', move: 'MOVE' };
+    function report(a, ctx, ok) {
+      var L = [];
+      var p = TaskManager.progress();
+      var remaining = STATE.remainingIssues || [];
+      var head = !ok ? '## Görev tamamlanamadı' : remaining.length ? '## Görev tamamlandı (kalan hatalarla)'
+        : a.intent === 'create' ? '## Proje tamamlandı' : a.intent === 'modify' ? '## Değişiklikler tamamlandı' : '## Hata ayıklama tamamlandı';
+      L.push(head, '');
+      L.push('**Mod:** ' + (a.intent === 'create' ? 'Yeni proje' : a.intent === 'modify' ? 'Mevcut projede değişiklik' : 'Hata ayıklama') +
+        ' · **Tip:** ' + a.projectKind + ' · **Framework:** ' + a.frameworkName + ' · **Karmaşıklık:** ' + a.complexity + ' · **Öncelik:** ' + a.priority);
+
+      L.push('', '### Plan', TaskManager.render());
+
+      L.push('', '### Dosya değişiklikleri');
+      if (!STATE.changes.length) L.push('- Dosya değişikliği yapılmadı.');
+      STATE.changes.forEach(function (c) {
+        L.push('- `' + (ACTION_TR[c.action] || c.action) + '` ' + (c.from ? c.from + ' → ' : '') + '**' + c.path + '** — ' + c.reason);
+      });
+
+      var feats = a.requirements.functionalRequirements;
+      if (a.intent !== 'fix' && feats.length) {
+        L.push('', '### Yapılan özellikler');
+        feats.concat(a.requirements.uiRequirements).forEach(function (f) { L.push('- ' + f); });
+      }
+
+      if (STATE.dependencies.length) {
+        L.push('', '### Bağımlılıklar');
+        STATE.dependencies.forEach(function (d) { L.push('- `' + d.name + '` — ' + d.reason + (d.files.length ? ' (' + d.files.join(', ') + ')' : '')); });
+      }
+
+      L.push('', '### Self-check (statik doğrulama)');
+      var initial = STATE.validation ? STATE.validation.initialErrors : 0;
+      L.push('- ' + (ctx.checkedFiles || 0) + ' dosya kontrol edildi; ilk taramada ' + initial + ' hata bulundu.');
+      if (STATE.detected && STATE.detected.length) {
+        STATE.detected.forEach(function (d) { L.push('- Tespit: `' + d.file + '` — ' + d.message + ' _(' + d.explanation + ')_'); });
+      }
+      STATE.fixes.forEach(function (f) {
+        L.push('- **Deneme ' + f.attempt + ':** ' + (f.applied.length ? f.applied.map(function (x) { return x.file + ' → ' + x.action; }).join('; ') : 'otomatik düzeltme uygulanamadı'));
+      });
+      if (remaining.length) {
+        L.push('- ⚠️ ' + CONFIG.maxFixAttempts + ' deneme sınırı içinde düzeltilemeyen hatalar:');
+        remaining.forEach(function (e) { L.push('  - `' + e.file + '`: ' + e.message); });
+      } else if (initial) {
+        L.push('- ✅ Tüm hatalar düzeltildi, yeniden doğrulama temiz.');
+      } else {
+        L.push('- ✅ Hata bulunmadı.');
+      }
+      if (STATE.warnings.length) L.push('- Uyarılar: ' + STATE.warnings.map(function (w) { return w.message; }).join(' · '));
+
+      if (ctx.testResult) {
+        L.push('', '### Testler (' + ctx.testResult.passed + '/' + ctx.testResult.total + ' — statik)');
+        ctx.testResult.tests.forEach(function (x) { L.push('- ' + x.status + ' — ' + x.name); });
+      }
+
+      var cnt = ChangeTracker.counts();
+      L.push('', '### Değişiklik özeti');
+      L.push('- ' + cnt.create + ' yeni dosya, ' + cnt.update + ' güncelleme' + (cnt.delete ? ', ' + cnt.delete + ' silme' : '') + (cnt.rename || cnt.move ? ', ' + (cnt.rename + cnt.move) + ' taşıma' : '') + '.');
+
+      L.push('', '### Preview');
+      if (STATE.preview && STATE.preview.available) L.push('- Hazır — workspace dosyalarından oluşturuldu.');
+      else if (STATE.preview && STATE.preview.note) L.push('- ' + STATE.preview.note);
+      else L.push('- Bu görev için preview yok.');
+
+      if (STATE.notes.length) { L.push('', '### Notlar'); STATE.notes.forEach(function (n) { L.push('- ' + n); }); }
+      STATE.errors.forEach(function (e) { L.push('- ❌ ' + e.type + ': ' + e.message + (e.file ? ' (' + e.file + ')' : '')); });
+      L.push('', '_Kod gerçek bir runtime\'da çalıştırılmadı; kontroller ve testler statik analizdir._');
+      return L.join('\n');
+    }
+    return { report: report };
+  })();
+
+  function summaryText(analysis, ctx) { return FinalReporter.report(analysis, ctx, STATE.status !== 'failed'); }
+
+  /* =================================================
+     29. RUN LIFECYCLE
+  ================================================= */
 
   function buildResult(analysis, ctx) {
-    var allDone = STATE.tasks.every(function (t) { return t.status === 'completed'; });
+    var allDone = STATE.tasks.every(function (t) { return t.status === 'completed' || t.status === 'skipped'; });
     var previewAvailable = !!(STATE.preview && STATE.preview.available);
-    var testsPassed = ctx.testResult ? ctx.testResult.failed === 0 : (STATE.testStatus === 'passed');
-
+    var testsPassed = ctx.testResult ? ctx.testResult.failed === 0 : STATE.testStatus === 'passed';
     return {
       ok: allDone && STATE.status === 'completed',
       model: MODEL.shortName,
-      response: TaskManager.render() + '\n\n' + summaryText(analysis, ctx),
-      analysis: clone(analysis),
+      response: FinalReporter.report(analysis, ctx, STATE.status === 'completed'),
+      analysis: clone(Object.assign({}, analysis, { project: undefined })),
+      intent: analysis.intent,
       plan: STATE.tasks.map(function (t) { return t.title; }),
       tasks: clone(STATE.tasks),
       files: STATE.files.map(function (f) { return f.path; }),
       filesDetailed: clone(STATE.files),
       changes: clone(STATE.changes),
+      notes: STATE.notes.slice(),
+      dependencies: clone(STATE.dependencies),
       errors: clone(STATE.errors),
+      issues: clone(STATE.remainingIssues || []),
       warnings: clone(STATE.warnings),
+      fixes: clone(STATE.fixes),
+      fixAttempts: STATE.fixAttempts,
       tests: clone(STATE.tests),
       testStatus: STATE.testStatus,
       testsPassed: testsPassed,
@@ -1469,69 +2258,71 @@ Durum akışı:
     };
   }
 
-  function summaryText(analysis, ctx) {
-    var lines = ['## Completed', '', '### Files'];
-    STATE.files.forEach(function (f) { lines.push((f.status === 'failed' ? '✗' : '✓') + ' ' + f.path); });
-    lines.push('', '### Changes');
-    if (!STATE.changes.length) lines.push('• (değişiklik notu yok)');
-    STATE.changes.forEach(function (c) { lines.push('✓ ' + c); });
-
-    lines.push('', '### Tests');
-    if (STATE.testStatus === 'passed') {
-      lines.push('✓ Doğrulama geçti');
-      if (ctx.testResult) {
-        ctx.testResult.tests.forEach(function (x) { lines.push((x.passed ? '✓' : '✗') + ' ' + x.name); });
-      }
-    } else if (STATE.testStatus === 'failed') {
-      lines.push('✗ Doğrulama başarısız:');
-      STATE.errors.forEach(function (e) { lines.push('  - ' + e.file + ': ' + e.message); });
-    } else {
-      lines.push('• testStatus: not_run');
-    }
-
-    lines.push('', '### Preview');
-    if (STATE.preview && STATE.preview.available) lines.push('✓ Hazır (' + STATE.preview.type + ')');
-    else if (STATE.preview && STATE.preview.reason) lines.push('• Preview yok: ' + STATE.preview.reason);
-    else lines.push('• Bu görev için preview yok.');
-
-    return lines.join('\n');
-  }
-
   function initRun(userMsg, options) {
     options = options || {};
+    var events = [];
     STATE = freshState();
+    STATE.events = events;
     STATE.task = userMsg == null ? '' : String(userMsg);
     STATE.startedAt = Date.now();
-
-    bus.emit('task:start', { task: STATE.task });
+    emit('agent:start', '🧠 Pro 1.0 agent başlatıldı.', { task: STATE.task }, 'task:analyzing');
 
     var workspace = ensureWorkspace(options.workspace || defaultWorkspace);
-    var web = options.web ? createWebAdapter(options.web) : createWebAdapter(null);
+    var web = createWebAdapter(options.web || null);
     var preview = options.preview ? createPreviewAdapter(options.preview) : defaultPreview;
 
     setStatus('analyzing');
-    var analysis = Analyzer.analyze(userMsg);
+    emit('analysis:start', '🧠 Talep, bağlam ve workspace analiz ediliyor...', {});
+    var analysis = RequestAnalyzer.analyze(userMsg, workspace);
+    STATE.analysis = clone(Object.assign({}, analysis, { project: undefined }));
+
+    var ctx = { analysis: analysis, workspace: workspace, web: web, preview: preview };
+    var fileList = null;
+    if (analysis.intent === 'create') {
+      ctx.generated = CodeGenerator.generate(analysis);
+      if (analysis.techKind === 'react' && ctx.generated['package.json'] == null) {
+        ctx.generated['package.json'] = JSON.stringify({
+          name: 'bilalai-react-app', private: true, version: '1.0.0', type: 'module',
+          scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+          dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' },
+          devDependencies: { vite: '^7.0.0', '@vitejs/plugin-react': '^5.0.0' },
+        }, null, 2) + '\n';
+      }
+      fileList = analysis.files.filter(function (f) { return ctx.generated[f] != null; });
+      Object.keys(ctx.generated).forEach(function (f) { if (fileList.indexOf(f) === -1) fileList.push(f); });
+    }
 
     setStatus('planning');
-    bus.emit('task:planning', {});
-    var tasks = Planner.build(analysis);
-    TaskManager.init(tasks);
-    bus.emit('task:created', { tasks: clone(STATE.tasks), plan: STATE.plan.slice() });
-
-    return { analysis: analysis, workspace: workspace, web: web, preview: preview };
+    TaskManager.init(Planner.build(analysis, fileList));
+    emit('plan:create', '📋 Plan oluşturuldu: ' + STATE.tasks.length + ' görev.', { tasks: clone(STATE.tasks), plan: STATE.plan.slice() }, 'task:created');
+    return ctx;
   }
 
-  function finishRun(analysis, ctx, ok) {
+  function finishRun(ctx, ok) {
     STATE.status = ok ? 'completed' : 'failed';
     STATE.finishedAt = Date.now();
     STATE.currentStep = null;
-    bus.emit(ok ? 'task:completed' : 'task:failed', { scope: 'run' });
-    return buildResult(analysis, ctx);
+    if (ok) remember(STATE.task, ctx.analysis);
+    var result = buildResult(ctx.analysis, ctx);
+    if (ok) emit('agent:complete', '✅ Görev tamamlandı.', { files: result.files, tests: result.tests.length }, 'task:completed');
+    else emit('agent:error', '❌ Agent hata ile durdu.', { errors: clone(STATE.errors) }, 'task:failed');
+    return result;
   }
 
-  // Senkron pipeline (generate)
+  function failRun(ctx, e) {
+    var running = STATE.tasks.filter(function (t) { return t.status === 'running'; })[0];
+    if (!STATE.errors.some(function (x) { return x.message === (e && e.message); })) {
+      recordError(e, { task: running ? running.title : null });
+    }
+    if (running) TaskManager.fail(running.id, e && e.message);
+    STATE.tasks.forEach(function (t) { if (t.status === 'pending') TaskManager.skip(t.id); });
+    return finishRun(ctx, false);
+  }
+
   function runSync(userMsg, options) {
-    var ctx = initRun(userMsg, options);
+    var ctx;
+    try { ctx = initRun(userMsg, options); }
+    catch (e) { recordError(e, { type: 'AnalysisError' }); return finishRun({ analysis: RequestAnalyzer.analyze('', createWorkspaceAdapter()) }, false); }
     try {
       for (var i = 0; i < STATE.tasks.length; i++) {
         var task = STATE.tasks[i];
@@ -1539,17 +2330,14 @@ Durum akışı:
         runStep(task, ctx);
         TaskManager.complete(task.id);
       }
-      return finishRun(ctx.analysis, ctx, true);
-    } catch (e) {
-      if (STATE.currentStepTaskId) TaskManager.fail(STATE.currentStepTaskId, e && e.message);
-      STATE.errors.push({ file: '(agent)', message: e && e.message });
-      return finishRun(ctx.analysis, ctx, false);
-    }
+      return finishRun(ctx, true);
+    } catch (e) { return failRun(ctx, e); }
   }
 
-  // Async pipeline (generateAsync / runTask): UI düşünme gecikmesi + adım nefesi
   async function runAsyncFlow(userMsg, options) {
-    var ctx = initRun(userMsg, options);
+    var ctx;
+    try { ctx = initRun(userMsg, options); }
+    catch (e) { recordError(e, { type: 'AnalysisError' }); return finishRun({ analysis: RequestAnalyzer.analyze('', createWorkspaceAdapter()) }, false); }
     await sleep(pickThinking(ctx.analysis.complexity));
     try {
       for (var i = 0; i < STATE.tasks.length; i++) {
@@ -1559,177 +2347,190 @@ Durum akışı:
         runStep(task, ctx);
         TaskManager.complete(task.id);
       }
-      return finishRun(ctx.analysis, ctx, true);
-    } catch (e) {
-      var running = STATE.tasks.filter(function (t) { return t.status === 'running'; })[0];
-      if (running) TaskManager.fail(running.id, e && e.message);
-      STATE.errors.push({ file: '(agent)', message: e && e.message });
-      return finishRun(ctx.analysis, ctx, false);
-    }
+      return finishRun(ctx, true);
+    } catch (e) { return failRun(ctx, e); }
   }
 
   /* =================================================
-     15. STATE SNAPSHOT (dışa dokunulmaz)
+     30. STATE SNAPSHOT
   ================================================= */
 
   function getStateSnapshot() {
     return clone({
-      status: STATE.status,
-      task: STATE.task,
-      plan: STATE.plan,
-      tasks: STATE.tasks,
-      files: STATE.files,
-      changes: STATE.changes,
-      errors: STATE.errors,
-      warnings: STATE.warnings,
-      tests: STATE.tests,
-      testStatus: STATE.testStatus,
-      preview: STATE.preview,
-      currentStep: STATE.currentStep,
-      fixAttempts: STATE.fixAttempts,
-      executionAvailable: STATE.executionAvailable,
-      startedAt: STATE.startedAt,
-      finishedAt: STATE.finishedAt,
-      progress: TaskManager.progress(),
+      status: STATE.status, task: STATE.task, analysis: STATE.analysis, plan: STATE.plan, tasks: STATE.tasks,
+      files: STATE.files, changes: STATE.changes, notes: STATE.notes, dependencies: STATE.dependencies,
+      errors: STATE.errors, issues: STATE.remainingIssues || [], warnings: STATE.warnings, fixes: STATE.fixes,
+      tests: STATE.tests, testStatus: STATE.testStatus, preview: STATE.preview, currentStep: STATE.currentStep,
+      fixAttempts: STATE.fixAttempts, executionAvailable: STATE.executionAvailable, events: STATE.events,
+      startedAt: STATE.startedAt, finishedAt: STATE.finishedAt, progress: TaskManager.progress(),
+      memory: { history: MEMORY.history, project: MEMORY.project },
     });
   }
 
   /* =================================================
-     16. SELF TEST
+     31. SELF TEST
   ================================================= */
 
   function selfTest() {
     var tests = [];
-    function check(name, cond) { tests.push({ name: name, passed: !!cond }); }
+    function check(group, name, fn) {
+      var passed = false, error = null;
+      try { passed = !!fn(); } catch (e) { error = e && e.message; }
+      tests.push({ group: group, name: name, passed: passed, error: error });
+    }
+    var savedState = STATE, savedMem = { history: MEMORY.history.slice(), project: MEMORY.project };
 
-    check('MODEL mevcut', BilalAIPro.MODEL && BilalAIPro.MODEL.name === 'BilalAI - Pro 1.0');
-    check('generate fonksiyonu', typeof BilalAIPro.generate === 'function');
-    check('generateAsync fonksiyonu', typeof BilalAIPro.generateAsync === 'function');
-    check('runTask fonksiyonu', typeof BilalAIPro.runTask === 'function');
-
-    // Planner
-    var plan = BilalAIPro.getPlan('Modern responsive todo uygulaması, index.html style.css app.js');
-    check('Planner çalışıyor', plan && plan.tasks && plan.tasks.length >= 4);
-    check('Analyzer todo tespiti', plan.analysis.projectType === 'todo');
-    check('Todo 3 dosyaya bölünüyor',
-      plan.analysis.files.indexOf('index.html') !== -1 &&
-      plan.analysis.files.indexOf('style.css') !== -1 &&
-      plan.analysis.files.indexOf('app.js') !== -1);
-
-    // Workspace (tek store)
-    var ws = createWorkspaceAdapter();
-    ws.writeFile('a.txt', 'hi');
-    check('Workspace tek store', ws.exists('a.txt') && ws.readFile('a.txt') === 'hi' && ws.listFiles().length === 1);
-    ws.deleteFile('a.txt');
-    check('Workspace silme', !ws.exists('a.txt'));
-
-    // Validator
-    var good = Validator.run({ 'x.js': 'function a(){ return 1; }' });
-    var bad = Validator.run({ 'x.js': 'function a(){ return 1;' });
-    check('Validator geçerli kodu kabul', good.ok === true);
-    check('Validator hatalı kodu yakalar', bad.ok === false);
-
-    // Fixer
-    var brokenFiles = { 'i.html': '<html><head></head><body><p>x</p>' };
-    var v1 = Validator.run(brokenFiles);
-    Fixer.fix(brokenFiles, v1.errors);
-    var v2 = Validator.run(brokenFiles);
-    check('Fixer HTML düzeltir', v2.ok === true);
-
-    // Preview adapter
-    var pv = createPreviewAdapter().previewProject({
-      'index.html': '<!DOCTYPE html><html><head></head><body>ok</body></html>',
-      'style.css': 'body{color:red}', 'app.js': 'console.log(1)',
+    check('API', 'Public API mevcut', function () {
+      return ['generate', 'generateAsync', 'runTask', 'analyze', 'plan', 'getPlan', 'getTasks', 'getFiles', 'getChanges',
+        'getState', 'getPreview', 'reset', 'onEvent', 'setWorkspace', 'selfTest'].every(function (k) { return typeof BilalAIPro[k] === 'function'; })
+        && BilalAIPro.MODEL.name === 'BilalAI - Pro 1.0';
     });
-    check('Preview adapter çalışıyor', pv && pv.available === true && typeof pv.url === 'string');
+    check('Analyzer', 'Todo isteği analiz ediliyor', function () {
+      var a = BilalAIPro.analyze('Modern responsive todo uygulaması oluştur. index.html, style.css, app.js ayrı olsun.', { workspace: createWorkspaceAdapter() });
+      return a.projectType === 'todo' && a.intent === 'create' && a.complexity === 'medium' &&
+        a.files.join(',') === 'index.html,style.css,app.js' && a.requirements.functionalRequirements.length >= 4;
+    });
+    check('Analyzer', 'Karmaşıklık sınıfları', function () {
+      var ws = createWorkspaceAdapter();
+      return BilalAIPro.analyze('Python\'da iki sayıyı topla', { workspace: ws }).complexity === 'simple' &&
+        BilalAIPro.analyze('JWT authentication + PostgreSQL + admin dashboard + REST API oluştur', { workspace: ws }).complexity === 'complex' &&
+        BilalAIPro.analyze('Bana full-stack SaaS platformu geliştir', { workspace: ws }).complexity === 'very-complex';
+    });
+    check('Analyzer', 'Bağlam: mevcut projeye değişiklik', function () {
+      var ws = createWorkspaceAdapter({ 'index.html': '<html><body></body></html>', 'style.css': 'body{}', 'app.js': 'var todos=[];' });
+      var a = BilalAIPro.analyze('Mevcut Todo uygulamasına dark mode ekle', { workspace: ws });
+      var b = BilalAIPro.analyze('app.js dosyasındaki hatayı bul ve düzelt', { workspace: ws });
+      return a.intent === 'modify' && a.context.modifications[0].kind === 'dark-mode' && b.intent === 'fix';
+    });
+    check('Planner', 'Plan karmaşıklığa göre değişiyor', function () {
+      var ws = createWorkspaceAdapter();
+      var s = BilalAIPro.plan('Bana basit bir hesap makinesi yap', { workspace: ws }).tasks.length;
+      var c = BilalAIPro.plan('React ile admin dashboard oluştur', { workspace: ws }).tasks.length;
+      return s >= 4 && c > s;
+    });
+    check('TaskManager', 'Durum geçişleri', function () {
+      STATE = freshState(); STATE.events = [];
+      TaskManager.init([{ id: 'a', title: 'A', type: 'x' }, { id: 'b', title: 'B', type: 'x' }]);
+      TaskManager.start('a'); TaskManager.complete('a'); TaskManager.skip('b');
+      return TaskManager.progress().completed === 2 && TaskManager.find('a').status === 'completed';
+    });
+    check('Workspace', 'CREATE/EDIT/RENAME/DELETE + change tracking', function () {
+      STATE = freshState(); STATE.events = [];
+      var ws = createWorkspaceAdapter();
+      WorkspaceManager.write(ws, 'a.js', '1', 'test'); WorkspaceManager.write(ws, 'a.js', '2', 'test');
+      WorkspaceManager.rename(ws, 'a.js', 'b.js', 'test'); WorkspaceManager.move(ws, 'b.js', 'src/b.js', 'test');
+      WorkspaceManager.remove(ws, 'src/b.js', 'test');
+      return STATE.changes.map(function (c) { return c.action; }).join(',') === 'create,update,rename,move,delete' && ws.listFiles().length === 0;
+    });
+    check('CodeGenerator', 'Placeholder\'sız gerçek kod', function () {
+      var g = CodeGenerator.generate(RequestAnalyzer.analyze('todo uygulaması index.html style.css app.js localStorage', createWorkspaceAdapter()));
+      return /localStorage/.test(g['app.js']) && !/\bTODO\b|PLACEHOLDER/.test(g['app.js'] + g['index.html']);
+    });
+    check('Validator', 'Sözdizimi hatası yakalanıyor', function () {
+      return Validator.run({ 'x.js': 'function a(){ return 1; }' }).ok && !Validator.run({ 'x.js': 'function a(){ return 1;' }).ok;
+    });
+    check('Reviewer', 'Eksik DOM selector tespit ediliyor', function () {
+      var r = CodeReviewer.review({ 'index.html': '<html><body><ul id="list"></ul></body></html>', 'app.js': "document.getElementById('todoList');" }, {});
+      return r.some(function (i) { return i.kind === 'dom-selector' && i.detail.id === 'todoList'; });
+    });
+    check('Fixer', 'DOM + HTML hataları düzeltiliyor', function () {
+      var f = { 'index.html': '<!DOCTYPE html><html><head></head><body><script src="app.js"></script>', 'app.js': "document.getElementById('todoList');" };
+      var errs = Validator.run(f).errors.concat(CodeReviewer.review(f, {}).filter(function (i) { return i.severity === 'error'; }));
+      AutoFixer.fix(f, errs);
+      return Validator.run(f).ok && CodeReviewer.review(f, {}).filter(function (i) { return i.severity === 'error'; }).length === 0;
+    });
+    check('Tester', 'Todo feature testleri', function () {
+      var g = CodeGenerator.generate(RequestAnalyzer.analyze('todo uygulaması index.html style.css app.js localStorage', createWorkspaceAdapter()));
+      var r = TestRunner.run({ techKind: 'web', projectType: 'todo', requirements: { uiRequirements: [] } }, g, CodeReviewer.review(g, {}));
+      return r.total >= 7 && r.failed === 0;
+    });
+    check('Preview', 'Gerçek dosyalardan preview', function () {
+      var pv = createPreviewAdapter().previewProject({ 'index.html': '<!DOCTYPE html><html><head></head><body>ok</body></html>', 'style.css': 'body{color:red}', 'app.js': 'console.log(1)' });
+      return pv.available && /color:red/.test(pv.html) && /console\.log\(1\)/.test(pv.html);
+    });
+    check('EventBus', 'Standart event şeması', function () {
+      var got = null, off = bus.on(function (e) { if (e.type === 'selftest:ping') got = e; });
+      emit('selftest:ping', 'ping', { a: 1 }); off();
+      return got && got.timestamp && got.message === 'ping' && got.metadata.a === 1;
+    });
+    check('Pipeline', 'Todo uçtan uca + dark mode takibi', function () {
+      var ws = createWorkspaceAdapter();
+      var r1 = BilalAIPro.generate('Modern responsive Todo uygulaması oluştur. index.html, style.css ve app.js ayrı olsun, localStorage olsun.', {}, { workspace: ws });
+      var r2 = BilalAIPro.generate('Mevcut Todo uygulamasına dark mode ekle', {}, { workspace: ws });
+      return r1.ok && r1.files.length === 3 && r1.testsPassed && r2.ok && r2.intent === 'modify' && /theme-toggle/.test(ws.readFile('index.html'));
+    });
+    check('Bağımsızlık', 'Flash motorlarına referans yok', function () {
+      var src = String(runAsyncFlow) + String(runStep) + String(initRun);
+      return !/BilalAIResponseEngine|BilalAIFlashLite|__BilalAIFlashCore/.test(src);
+    });
 
-    // Flash'a fallback YOK
-    check('Flash motoruna bağımlı değil',
-      BilalAIPro.toString().indexOf('BilalAIResponseEngine') === -1);
-
-    // Gerçek üretim: senkron todo görevi
-    var localWs = createWorkspaceAdapter();
-    var r = BilalAIPro.generate(
-      'Modern responsive todo uygulaması oluştur. index.html, style.css, app.js. localStorage, enter ile ekle, bos gorev engelle, sil, tamamla.',
-      {}, { workspace: localWs });
-    check('Todo görevi 3 dosya üretti',
-      r.files.indexOf('index.html') !== -1 && r.files.indexOf('style.css') !== -1 && r.files.indexOf('app.js') !== -1);
-    check('Üretilen JS localStorage içeriyor', /localStorage/.test(localWs.readFile('app.js') || ''));
-    check('Görev tamamlandı (ok)', r.ok === true);
-
+    STATE = savedState; MEMORY.history = savedMem.history; MEMORY.project = savedMem.project;
     var passed = tests.filter(function (x) { return x.passed; }).length;
-    return { ok: passed === tests.length, passed: passed, failed: tests.length - passed, tests: tests };
+    var groups = {};
+    tests.forEach(function (x) { groups[x.group] = groups[x.group] || { passed: 0, total: 0 }; groups[x.group].total++; if (x.passed) groups[x.group].passed++; });
+    return { ok: passed === tests.length, passed: passed, failed: tests.length - passed, total: tests.length, groups: groups, tests: tests };
   }
 
   /* =================================================
-     17. PUBLIC API
+     32. PUBLIC API
   ================================================= */
+
+  function wsFrom(options) { return ensureWorkspace((options && options.workspace) || defaultWorkspace); }
 
   var BilalAIPro = {
     MODEL: MODEL,
     CONFIG: CONFIG,
-
-    // Adapter fabrikaları (UI kendi adapter'ını enjekte edebilir)
     createWorkspaceAdapter: createWorkspaceAdapter,
     createWebAdapter: createWebAdapter,
     createPreviewAdapter: createPreviewAdapter,
 
     onEvent: function (cb) { return bus.on(cb); },
+    setWorkspace: function (adapter) { defaultWorkspace = ensureWorkspace(adapter); return true; },
 
-    setWorkspace: function (adapter) {
-      defaultWorkspace = ensureWorkspace(adapter);
-      return true;
+    analyze: function (userMsg, options) {
+      var a = RequestAnalyzer.analyze(userMsg, wsFrom(options));
+      return clone(a);
     },
+    plan: function (userMsg, options) {
+      var a = RequestAnalyzer.analyze(userMsg, wsFrom(options));
+      var files = null;
+      if (a.intent === 'create') files = Object.keys(CodeGenerator.generate(a));
+      var tasks = Planner.build(a, files);
+      return { analysis: clone(a), tasks: tasks, titles: tasks.map(function (t) { return t.title; }) };
+    },
+    getPlan: function (userMsg, options) { return BilalAIPro.plan(userMsg, options); },
 
     getState: function () { return getStateSnapshot(); },
     getTasks: function () { return clone(STATE.tasks); },
     getFiles: function () { return clone(STATE.files); },
+    getChanges: function () { return clone(STATE.changes); },
     getPreview: function () { return clone(STATE.preview); },
+    getMemory: function () { return clone(MEMORY); },
 
-    getPlan: function (userMsg) {
-      var analysis = Analyzer.analyze(userMsg);
-      var tasks = Planner.build(analysis);
-      return { analysis: analysis, tasks: tasks, titles: tasks.map(function (t) { return t.title; }) };
-    },
-
-    reset: function () {
+    reset: function (options) {
       STATE = freshState();
-      bus.emit('reset', {});
+      if (options && options.memory) { MEMORY.history = []; MEMORY.project = null; }
+      bus.emit('reset', { message: 'Agent sıfırlandı.' });
       return true;
     },
 
-    // Senkron pipeline — TEK agent loop (ikinci kez başlatmaz).
-    generate: function (userMsg, context, options) {
-      return runSync(userMsg, options || {});
-    },
-
-    // Async pipeline (Promise) — TEK agent loop.
-    generateAsync: function (userMsg, context, options) {
-      return runAsyncFlow(userMsg, options || {});
-    },
-
-    // runTask: async agent akışı (asıl kullanım).
-    runTask: function (userMsg, options) {
-      return runAsyncFlow(userMsg, options || {});
-    },
+    generate: function (userMsg, context, options) { return runSync(userMsg, options || {}); },
+    generateAsync: function (userMsg, context, options) { return runAsyncFlow(userMsg, options || {}); },
+    runTask: function (userMsg, options) { return runAsyncFlow(userMsg, options || {}); },
 
     selfTest: selfTest,
   };
 
   /* =================================================
-     18. EXPORTS
+     33. EXPORTS
   ================================================= */
 
   if (typeof window !== 'undefined') {
-    // Flash motorunun üzerine YAZMA; yalnızca kendi API'sini aç.
     window.BilalAIPro = BilalAIPro;
   }
-
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = BilalAIPro;
   }
-
   return BilalAIPro;
 
 })(typeof globalThis !== 'undefined' ? globalThis : this);
-
