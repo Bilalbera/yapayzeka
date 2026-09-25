@@ -360,6 +360,59 @@
     .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(16px); opacity:0; pointer-events:none; z-index:120; background:#171a1f; border:1px solid var(--line-strong); color:var(--text); padding:9px 12px; border-radius:9px; box-shadow:var(--shadow); font-size:10px; transition:.2s ease; }
     .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
+    /* =========================================================
+       BilalAI Workspace UI Fix v5
+       - Model picker no longer clips or shows a partial selection.
+       - Attachments show as chips and can be dropped into composer.
+       - Admin panel gets workspace/diagnostic tools.
+       - Chat scrolling avoids expensive smooth-scroll churn.
+    ========================================================= */
+    .composer-left { min-width:0; overflow:visible; }
+    .model-picker { flex:0 0 auto; position:relative; z-index:70; }
+    .model-picker-btn { width:210px; min-width:210px; max-width:210px; flex:0 0 210px; }
+    .model-picker-copy { min-width:0; overflow:hidden; }
+    .model-picker-name, .model-picker-meta { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .model-picker-menu {
+      width:360px; max-width:min(360px, calc(100vw - 24px)); max-height:min(70vh, 440px);
+      overflow:auto; overscroll-behavior:contain;
+    }
+    .picker-option { min-width:0; }
+    .picker-option > span:nth-child(2) { min-width:0; }
+    .picker-option-name, .picker-option-desc { overflow-wrap:anywhere; }
+
+    .attachment-tray {
+      display:none; align-items:center; gap:6px; padding:0 10px 8px; overflow-x:auto;
+      border-top:1px solid rgba(255,255,255,.035); background:#101419; scrollbar-width:thin;
+    }
+    .attachment-tray.has-files { display:flex; }
+    .attachment-chip {
+      flex:0 0 auto; max-width:280px; min-height:29px; display:inline-flex; align-items:center; gap:6px;
+      padding:4px 6px 4px 8px; border:1px solid rgba(255,255,255,.09); border-radius:8px;
+      background:#171b20; color:var(--muted); font-size:9px;
+    }
+    .attachment-chip-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+    .attachment-chip-meta { white-space:nowrap; color:var(--muted-2); }
+    .attachment-chip-remove { width:20px; height:20px; border:0; background:transparent; color:var(--muted-2); border-radius:6px; cursor:pointer; }
+    .attachment-chip-remove:hover { background:#22272e; color:var(--text); }
+    .drop-active .composer-box { border-color:rgba(41,182,255,.55); box-shadow:0 0 0 3px rgba(41,182,255,.07),0 18px 60px rgba(0,0,0,.32); }
+
+    .admin-extra-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:8px; }
+    .admin-stat-card { border:1px solid var(--line); background:#15181c; border-radius:10px; padding:11px; }
+    .admin-stat-card .value { font-size:18px; font-weight:850; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .admin-stat-card .label { margin-top:3px; color:var(--muted); font-size:9px; }
+    .admin-tool-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:9px; }
+    .admin-log { max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:10px; background:#0d1014; padding:8px; color:var(--muted); font:10px/1.6 var(--editor-font); white-space:pre-wrap; }
+    .health-ok { color:var(--green); }
+    .health-bad { color:var(--red); }
+
+    @media (max-width:680px) {
+      .composer-left { overflow-x:auto; }
+      .model-picker-btn { width:180px; min-width:180px; max-width:180px; flex-basis:180px; }
+      .model-picker-menu { width:calc(100vw - 24px); max-width:calc(100vw - 24px); }
+      .admin-extra-grid { grid-template-columns:1fr; }
+      .admin-tool-grid { grid-template-columns:1fr; }
+    }
+
     /* responsive */
     .mobile-only { display:none; }
     @media (max-width:1200px) {
@@ -705,7 +758,7 @@
 
     @media (max-width: 1280px) {
       :root { --sidebar-w: 224px; --workspace-w: 385px; }
-      .model-picker-btn { min-width: 168px; }
+      .model-picker-btn { width:210px; min-width:210px; max-width:210px; }
       .tool-btn[data-quick] { display: none; }
     }
 
@@ -828,6 +881,7 @@
       <div class="composer">
         <div class="composer-box">
           <textarea id="messageInput" class="composer-textarea" rows="1" placeholder="BilalAI'ya bir görev yaz… Örn: Python ile hesap makinesi dosyası oluştur"></textarea>
+          <div class="attachment-tray" id="attachmentTray" aria-live="polite"></div>
           <div class="composer-bottom">
             <div class="composer-left">
               <label class="attach-btn" title="Dosya ekle">
@@ -866,7 +920,7 @@
                   <button type="button" class="picker-option" data-model="pro" role="option">
                     <span class="picker-option-icon" style="background:rgba(139,92,246,.13);">🧠</span>
                     <span>
-                      <span class="picker-option-name">BilalAI — Pro 1.0</span>
+                      <span class="picker-option-name">BilalAI — Pro 1.1</span>
                       <span class="picker-option-desc">Proje odaklı; daha kapsamlı açıklama, kod ve workspace akışı.</span>
                       <span class="picker-option-tags"><span class="picker-tag">1.2–2.4 sn</span><span class="picker-tag">Pro</span><span class="picker-tag">Projeler</span></span>
                     </span>
@@ -888,7 +942,7 @@
             </button>
           </div>
         </div>
-        <div class="composer-note">BilalAI yanıt motoru · yerel çalışma alanı · dosyalar tarayıcıda saklanır</div>
+        <div class="composer-note">BilalAI · yerel workspace · eklenen metin dosyaları AI tarafından okunabilir</div>
       </div>
     </div>
   </main>
@@ -982,7 +1036,7 @@
       <div class="model-card" data-model="pro">
         <div class="model-card-icon-wrap" style="background:rgba(139,92,246,.13);color:#a78bfa;">🧠</div>
         <div>
-          <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;"><div class="model-card-name">BilalAI — Pro 1.0</div><span class="model-tag" style="color:#c4b5fd;background:rgba(139,92,246,.12);">PRO</span></div>
+          <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;"><div class="model-card-name">BilalAI — Pro 1.1</div><span class="model-tag" style="color:#c4b5fd;background:rgba(139,92,246,.12);">PRO</span></div>
           <div class="model-card-desc">Daha kapsamlı proje akışı, uzun yanıtlar, dosya odaklı üretim ve workspace ile birlikte çalışma için.</div>
           <div class="model-card-tags"><span class="model-tag">1.2–2.4 sn</span><span class="model-tag">Projeler</span><span class="model-tag">Dosyalar</span><span class="model-tag">Derin</span></div>
         </div>
@@ -1031,6 +1085,8 @@
         <button class="admin-tab" data-tab="skills">🧠 Beceriler</button>
         <button class="admin-tab" data-tab="errors">🐞 Hatalar</button>
         <button class="admin-tab" data-tab="system">📢 Sistem</button>
+        <button class="admin-tab" data-tab="workspace">📁 Workspace</button>
+        <button class="admin-tab" data-tab="diagnostics">🩺 Tanılama</button>
         <button class="admin-tab" data-tab="settings">⚙ Ayarlar</button>
       </div>
 
@@ -1066,21 +1122,82 @@
 
       <div class="admin-tab-content" data-content="system"><textarea class="admin-textarea" id="systemMsgInput" rows="3" placeholder="Sistem mesajı"></textarea><button class="btn-primary" id="sendSystemMsgBtn" style="margin-top:7px">Yayınla</button><div class="sub-title" style="margin-top:12px">Geçmiş</div><div id="systemMsgHistory" class="sys-msg-list"></div></div>
 
+      <div class="admin-tab-content" data-content="workspace">
+        <div class="sub-title">Workspace özeti</div>
+        <div class="admin-extra-grid">
+          <div class="admin-stat-card"><div class="value" id="workspaceFileTotal">0</div><div class="label">Dosya</div></div>
+          <div class="admin-stat-card"><div class="value" id="workspaceBytesTotal">0 B</div><div class="label">Toplam içerik</div></div>
+          <div class="admin-stat-card"><div class="value" id="workspaceCurrentFile">—</div><div class="label">Açık dosya</div></div>
+        </div>
+        <div class="admin-tool-grid">
+          <button class="btn-secondary" id="adminExportWorkspaceBtn">Workspace JSON dışa aktar</button>
+          <button class="btn-secondary" id="adminImportWorkspaceBtn">Workspace JSON içe aktar</button>
+          <button class="btn-secondary" id="adminRefreshWorkspaceBtn">İstatistikleri yenile</button>
+          <button class="btn-danger" id="adminClearWorkspaceBtn">Workspace'i temizle</button>
+        </div>
+        <div class="sub-title" style="margin-top:14px">Dosya listesi</div>
+        <div class="admin-log" id="adminWorkspaceFileLog">Workspace yükleniyor…</div>
+      </div>
+
+      <div class="admin-tab-content" data-content="diagnostics">
+        <div class="sub-title">Motor durumu</div>
+        <div class="admin-extra-grid">
+          <div class="admin-stat-card"><div class="value" id="diagFlashStatus">—</div><div class="label">Flash 1.2</div></div>
+          <div class="admin-stat-card"><div class="value" id="diagLiteStatus">—</div><div class="label">FlashLite 1.0</div></div>
+          <div class="admin-stat-card"><div class="value" id="diagProStatus">—</div><div class="label">Pro 1.x</div></div>
+        </div>
+        <div class="dashboard-card">
+          <div class="sub-title">Tanılama</div>
+          <div class="admin-log" id="adminDiagLog">Henüz tanılama çalıştırılmadı.</div>
+        </div>
+        <div class="admin-tool-grid">
+          <button class="btn-secondary" id="adminRunDiagnosticsBtn">Tanılamayı çalıştır</button>
+          <button class="btn-secondary" id="adminCopyDiagnosticsBtn">Raporu kopyala</button>
+          <button class="btn-secondary" id="adminClearDiagLogBtn">Günlüğü temizle</button>
+          <button class="btn-secondary" id="adminResetPickerBtn">Modeli Flash'a sıfırla</button>
+        </div>
+      </div>
+
       <div class="admin-tab-content" data-content="settings"><div class="settings-actions"><button class="btn-secondary" id="exportJsonBtn">Tüm JSON</button><button class="btn-secondary" id="exportTxtBtn">TXT</button></div><div class="setting-row"><span>Vurgu rengi</span><input type="color" id="accentColor" value="#22b8ff"></div><div class="setting-row"><span>Welcome ekranı</span><input type="checkbox" id="showWelcome" checked></div><div class="setting-row"><span>Varsayılan model</span><select class="admin-input" id="defaultModel"><option value="flash">Flash 1.2</option><option value="flashlite">FlashLite 1.0</option><option value="pro">Pro 1.0</option></select></div><div class="danger-zone"><div class="sub-title" style="color:#ff8996">Tehlikeli Bölge</div><button class="btn-danger" id="resetMemoryBtn">Tüm veriyi sıfırla</button><div style="margin-top:9px"><input class="admin-input" id="oldPass" placeholder="Mevcut parola"><input class="admin-input" id="newPass" placeholder="Yeni parola" style="margin-top:5px"><input class="admin-input" id="newPass2" placeholder="Yeni parola tekrar" style="margin-top:5px"><button class="btn-secondary" id="changePassBtn" style="margin-top:5px">Parolayı güncelle</button></div></div><div class="sub-title" style="margin-top:12px">Depolama</div><ul id="storageInfo" class="storage-info"></ul></div>
     </div>
   </div>
 </div>
 
 <input id="workspaceImportInput" type="file" multiple hidden />
+<input id="workspaceJsonImportInput" type="file" accept="application/json,.json" hidden />
 <div class="toast" id="toast"></div>
 
 <script>
 window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', { message:e.message, filename:e.filename, line:e.lineno, column:e.colno, error:e.error }); });
+window.addEventListener('unhandledrejection', function(e){ console.error('🔥 UNHANDLED PROMISE:', e.reason); });
 </script>
-<script src="./flashmodel.js?v=20260924r6"></script>
+<script src="./model.js?v=20260924r6"></script>
 <script src="./flashlitemodel.js?v=20260924r6"></script>
-<script src="./promodel.js?v=20260924r1"></script>
-<script src="./script.js?v=20260924r6"></script>
+<script>
+window.__BilalAIProReady = (async function(){
+  try {
+    const mod = await import('./promodel.js?v=20260925r2');
+    const pro = mod.default || mod.BilalAIPro || window.BilalAIPro;
+    if (pro) window.BilalAIPro = pro;
+    return !!window.BilalAIPro;
+  } catch (error) {
+    console.error('❌ Pro module yüklenemedi:', error);
+    return false;
+  }
+})();
+</script>
+<script>
+window.__BilalAIScriptReady = (async function(){
+  await (window.__BilalAIProReady || Promise.resolve(false));
+  const script = document.createElement('script');
+  script.src = './script.js?v=20260925r7';
+  document.body.appendChild(script);
+  return new Promise((resolve, reject) => {
+    script.addEventListener('load', () => resolve(true), {once:true});
+    script.addEventListener('error', reject, {once:true});
+  });
+})();
+</script>
 
 <script>
 (function(){
@@ -1332,16 +1449,87 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
     }
   }
 
+  /* =========================================================
+     Attachments / File Context
+  ========================================================= */
+  const ATTACHMENT_LIMIT = 256 * 1024;
+  const TEXT_EXTS = new Set(['txt','md','markdown','js','mjs','cjs','jsx','ts','tsx','json','html','htm','css','scss','sass','less','xml','yaml','yml','csv','sql','py','java','c','h','cpp','hpp','cs','go','rs','php','rb','dart','sh','bat','ps1','log']);
+  window.__BilalAIAttachments = window.__BilalAIAttachments || [];
+
+  function formatBytes(n){
+    if(n<1024)return n+' B';
+    if(n<1024*1024)return (n/1024).toFixed(1)+' KB';
+    return (n/(1024*1024)).toFixed(1)+' MB';
+  }
+  function isTextLikeFile(file){
+    const ext=(file.name.split('.').pop()||'').toLowerCase();
+    return (file.type||'').startsWith('text/') || TEXT_EXTS.has(ext) || /javascript|json|xml/.test(file.type||'');
+  }
+  async function readAttachmentText(file){
+    if(!isTextLikeFile(file)) return null;
+    const content=await file.text();
+    return content.length>ATTACHMENT_LIMIT ? content.slice(0,ATTACHMENT_LIMIT)+'\n\n[Dosya 256 KB sınırında kesildi.]' : content;
+  }
+  function renderAttachmentTray(){
+    const tray=$('#attachmentTray'); if(!tray)return;
+    const items=window.__BilalAIAttachments||[];
+    tray.innerHTML=items.map((a,i)=>`<div class="attachment-chip" title="${escapeHtml(a.name)}"><span>📎</span><span class="attachment-chip-name">${escapeHtml(a.name)}</span><span class="attachment-chip-meta">${formatBytes(a.size)}</span><button type="button" class="attachment-chip-remove" data-attachment-index="${i}" aria-label="Eki kaldır">×</button></div>`).join('');
+    tray.classList.toggle('has-files',items.length>0);
+  }
+  async function handleUploadedFiles(fileList){
+    const list=Array.from(fileList||[]); if(!list.length)return;
+    for(const file of list){
+      try{
+        const content=await readAttachmentText(file);
+        await addFile(file.name,content===null?'[Binary / metin içeriği okunamıyor]':content,file.name.split('.').pop()||'');
+        const item={name:file.name,size:file.size,type:file.type||'',content,readable:content!==null,addedAt:Date.now()};
+        const idx=window.__BilalAIAttachments.findIndex(x=>x.name===file.name);
+        if(idx>=0)window.__BilalAIAttachments.splice(idx,1,item); else window.__BilalAIAttachments.push(item);
+      }catch(err){ console.warn('Dosya yükleme:',err); toast('⚠️ '+file.name+' yüklenemedi'); }
+    }
+    renderAttachmentTray();
+    if(typeof refreshAdminWorkspaceStats==='function')refreshAdminWorkspaceStats();
+    const unreadable=list.filter(f=>!isTextLikeFile(f)).length;
+    toast(unreadable?`📎 ${list.length} dosya eklendi · ${unreadable} metin olmayan dosya`: `📎 ${list.length} dosya workspace'e eklendi`);
+  }
+  function attachmentContext(){
+    const items=(window.__BilalAIAttachments||[]).filter(x=>x.readable && x.content!==null);
+    if(!items.length)return '';
+    return '\n\n--- BİLALAI DOSYA EKLERİ ---\n'+items.map(x=>`[DOSYA: ${x.name}]\n${x.content}`).join('\n\n')+'\n--- DOSYA EKLERİ SONU ---\n';
+  }
+  function wrapEngineForAttachments(name){
+    const engine=window[name];
+    if(!engine || engine.__bilalaiAttachmentProxy)return;
+    window[name]=new Proxy(engine,{get(target,prop,receiver){
+      if(prop==='__bilalaiAttachmentProxy')return true;
+      if(prop==='generate' && typeof target.generate==='function')return function(userMsg,ctx){
+        const result=target.generate.call(target,String(userMsg||'')+attachmentContext(),ctx); window.__BilalAIAttachments=[]; renderAttachmentTray(); return result;
+      };
+      if(prop==='generateAsync' && typeof target.generateAsync==='function')return async function(userMsg,ctx){
+        try{return await target.generateAsync.call(target,String(userMsg||'')+attachmentContext(),ctx);} finally {window.__BilalAIAttachments=[];renderAttachmentTray();}
+      };
+      return Reflect.get(target,prop,receiver);
+    }});
+  }
+  function installAttachmentBridges(){ wrapEngineForAttachments('BilalAIResponseEngine'); wrapEngineForAttachments('BilalAIFlashLite'); }
+  function installDragDrop(){
+    const box=document.querySelector('.composer-box'); if(!box)return;
+    ['dragenter','dragover'].forEach(type=>box.addEventListener(type,e=>{e.preventDefault();e.stopPropagation();box.parentElement.classList.add('drop-active');}));
+    ['dragleave','drop'].forEach(type=>box.addEventListener(type,e=>{e.preventDefault();e.stopPropagation();box.parentElement.classList.remove('drop-active');}));
+    box.addEventListener('drop',e=>handleUploadedFiles(e.dataTransfer?.files));
+  }
+
+  /* Pro 1.1 workspace compatibility: supports both `workspace.files` and adapter methods. */
   const MODEL_UI={
     flashlite:{name:'FlashLite 1.0',icon:'⚡',meta:'Ultra hızlı · Hafif'},
     flash:{name:'Flash 1.2',icon:'⚡',meta:'Hızlı · Dengeli'},
-    pro:{name:'Pro 1.0',icon:'🧠',meta:'Pro · Proje odaklı'}
+    pro:{name:'Pro 1.1',icon:'🧠',meta:'Agent · Kodlama · Workspace'}
   };
   function getModelKey(){return getSettings().currentModel||'flash';}
   function renderModelPicker(){
     const key=getModelKey(); const m=MODEL_UI[key]||MODEL_UI.flash;
     $('#modelSelector').value=key;
-    $('#composerModelName').textContent=m.name; $('#composerModelMeta').textContent=m.meta; $('#composerModelIcon').textContent=m.icon;
+    $('#composerModelName').textContent=m.name; $('#composerModelMeta').textContent=m.meta; $('#composerModelIcon').textContent=m.icon; $('#modelPickerBtn').title='Aktif model: '+m.name+' — diğer modeller için tıkla';
     $$('.picker-option').forEach(o=>{const active=o.dataset.model===key;o.classList.toggle('active',active);o.setAttribute('aria-selected',active?'true':'false');});
     $$('.model-card').forEach(card=>card.classList.toggle('active',card.dataset.model===key));
     $('#modalActiveModelLabel').textContent='Aktif: BilalAI — '+m.name;
@@ -1373,84 +1561,32 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
     });
   }
 
-  /* =========================================================
-     PRO 1.0 BRIDGE
-     Pro agent'ın ürettiği dosyalar gerçekten bu workspace'e
-     (IndexedDB + dosya ağacı) yazılır; preview gerçek dosyalardan
-     hazırlanır. Flash/FlashLite akışına dokunulmaz.
-  ========================================================= */
-  function proWriteFile(path, content){
-    const name=String(path||'').replace(/^\.?\//,'');
-    if(!name) return false;
-    files[name]={content:String(content??''),language:name.split('.').pop()||'',updatedAt:new Date().toISOString()};
-    Promise.resolve()
-      .then(()=>persistFile(name))
-      .catch(e=>console.warn('Pro dosya kaydı:',e));
-    renderFiles(); updateStorageLabel();
-    if(!currentFile || currentFile===name) selectFile(name);
-    return true;
-  }
-
   const proWorkspace={
     kind:'bilalai-workspace',
+    get files(){ return files; },
     listFiles:()=>Object.keys(files),
     readFile:(p)=>{const n=String(p||'').replace(/^\.?\//,'');return files[n]?files[n].content:null;},
-    writeFile:proWriteFile,
-    updateFile:proWriteFile,
-    deleteFile:(p)=>{const n=String(p||'').replace(/^\.?\//,'');if(!files[n])return false;delete files[n];if(workspaceReady)idbDelete(n).catch(()=>{});renderFiles();return true;},
+    writeFile:(p,c)=>{const n=String(p||'').replace(/^\.?\//,'');if(!n)return false;files[n]={content:String(c??''),language:n.split('.').pop()||'',updatedAt:new Date().toISOString()};Promise.resolve().then(()=>persistFile(n)).catch(e=>console.warn('Pro dosya kaydı:',e));renderFiles();updateStorageLabel();if(!currentFile)selectFile(n);return true;},
+    updateFile:function(p,c){return this.writeFile(p,c);},
+    deleteFile:(p)=>{const n=String(p||'').replace(/^\.?\//,'');if(!files[n])return false;delete files[n];if(workspaceReady)idbDelete(n).catch(()=>{});if(currentFile===n){currentFile=null;$('#editorFileName').textContent='Dosya seçilmedi';$('#fileEditor').value='';updateLineNumbers();}renderFiles();updateStorageLabel();return true;},
     exists:(p)=>!!files[String(p||'').replace(/^\.?\//,'')],
-    clear:()=>{Object.keys(files).forEach(k=>delete files[k]);if(workspaceReady)idbClear().catch(()=>{});renderFiles();return true;}
+    clear:()=>{for(const k of Object.keys(files))delete files[k];if(workspaceReady)idbClear().catch(()=>{});currentFile=null;renderFiles();updateStorageLabel();return true;}
   };
-
-  function inlinePreviewHtml(map){
-    let htmlKey=null;
-    Object.keys(map).forEach(k=>{ if(/\.html?$/i.test(k) && (htmlKey===null || /index\.html$/i.test(k))) htmlKey=k; });
-    if(htmlKey===null) return null;
-    let out=String(map[htmlKey]||'')
-      .replace(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi,'')
-      .replace(/<script[^>]+src=["'][^"']+["'][^>]*>\s*<\/script>/gi,'');
-    let css='',js='';
-    Object.keys(map).forEach(k=>{
-      if(/\.css$/i.test(k)) css+='\n/* '+k+' */\n'+map[k];
-      if(/\.js$/i.test(k)) js+='\n/* '+k+' */\n'+map[k];
-    });
-    if(css) out=/<\/head>/i.test(out)?out.replace(/<\/head>/i,'<style>'+css+'\n</style></head>'):'<style>'+css+'\n</style>'+out;
-    if(js) out=/<\/body>/i.test(out)?out.replace(/<\/body>/i,'<scr'+'ipt>\n'+js+'\n</scr'+'ipt></body>'):out+'<scr'+'ipt>\n'+js+'\n</scr'+'ipt>';
-    return out;
-  }
-
-  const proPreview={
-    previewProject(map){
-      const html=inlinePreviewHtml(map||{});
-      if(html==null) return {available:false,reason:'no_html_entry',note:'Preview için index.html bulunamadı.'};
-      const frame=$('#htmlPreviewFrame'), code=$('#previewCode');
-      if(frame){frame.hidden=false; if(code)code.hidden=true; frame.srcdoc=html;}
-      const title=$('#previewTitle'); if(title) title.textContent='Pro Preview — index.html';
-      return {available:true,type:'html',url:'srcdoc',title:'BilalAI Pro Preview',html};
-    }
-  };
-
   function setupProBridge(){
-    window.BilalAIProBridge={workspace:proWorkspace,preview:proPreview};
-    if(window.BilalAIPro && typeof window.BilalAIPro.setWorkspace==='function'){
-      window.BilalAIPro.setWorkspace(proWorkspace);
-    }
-    if(window.BilalAIPro && typeof window.BilalAIPro.onEvent==='function'){
-      window.BilalAIPro.onEvent((ev)=>{
-        if(!ev) return;
-        if(ev.type==='file:created'||ev.type==='file:updated') toast('📄 '+ev.path);
-        else if(ev.type==='validation:failed') toast('⚠️ Self-check hata buldu, düzeltiliyor…');
-        else if(ev.type==='validation:passed') toast('✓ Self-check geçti');
-        else if(ev.type==='preview:ready') toast('▶ Preview hazır');
-      });
-    }
+    window.BilalAIProBridge={workspace:proWorkspace};
+    if(window.BilalAIPro && typeof window.BilalAIPro.setWorkspace==='function') window.BilalAIPro.setWorkspace(proWorkspace);
   }
 
   async function setup(){
     renderModelPicker(); renderFiles(); updateStorageLabel();
     await initWorkspaceDB();
+    try { await (window.__BilalAIProReady || Promise.resolve(false)); } catch {}
     setupProBridge();
-
+    installAttachmentBridges();
+    installDragDrop();
+    renderAttachmentTray();
+    refreshAdminWorkspaceStats();
+    refreshDiagnostics();
 
     $('#modelSelector')?.addEventListener('change',e=>chooseModel(e.target.value));
     $('#modelPickerBtn')?.addEventListener('click',e=>{e.stopPropagation();const menu=$('#modelPickerMenu');const open=menu.classList.toggle('open');$('#modelPickerBtn').classList.toggle('open',open);$('#modelPickerBtn').setAttribute('aria-expanded',open?'true':'false');});
@@ -1478,10 +1614,71 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
     $('#connectFolderBtn')?.addEventListener('click',connectFolder);
     $('#createFileBtn')?.addEventListener('click',async()=>{const n=prompt('Dosya adı (örn. index.html):','index.html');if(n)await addFile(n,'','');});
     $('#importFilesBtn')?.addEventListener('click',()=>$('#workspaceImportInput')?.click());
-    $('#workspaceImportInput')?.addEventListener('change',async e=>{for(const f of e.target.files){await addFile(f.name,await f.text(),f.name.split('.').pop());}e.target.value='';});
-    $('#fileUploadInput')?.addEventListener('change',async e=>{for(const f of e.target.files){await addFile(f.name,await f.text(),f.name.split('.').pop());}e.target.value='';});
+    $('#workspaceImportInput')?.addEventListener('change',async e=>{await handleUploadedFiles(e.target.files);e.target.value='';});
+    $('#fileUploadInput')?.addEventListener('change',async e=>{await handleUploadedFiles(e.target.files);e.target.value='';});
     $$('.workspace-tab').forEach(tab=>tab.addEventListener('click',()=>{ $$('.workspace-tab').forEach(t=>t.classList.remove('active'));tab.classList.add('active'); if(tab.dataset.wtab==='preview')previewCurrent(); }));
     $('#openWorkspaceBtn')?.addEventListener('click',()=>{document.documentElement.style.setProperty('--workspace-w','500px');toast('📁 Workspace açık');});
+
+    $('#attachmentTray')?.addEventListener('click',e=>{
+      const btn=e.target.closest('[data-attachment-index]'); if(!btn)return;
+      const i=Number(btn.dataset.attachmentIndex); if(Number.isFinite(i)){window.__BilalAIAttachments.splice(i,1);renderAttachmentTray();}
+    });
+
+    function refreshAdminWorkspaceStats(){
+      const names=Object.keys(files).sort();
+      const bytes=names.reduce((n,k)=>n+new Blob([files[k]?.content||'']).size,0);
+      const total=$('#workspaceFileTotal');if(total)total.textContent=names.length;
+      const bt=$('#workspaceBytesTotal');if(bt)bt.textContent=formatBytes(bytes);
+      const cf=$('#workspaceCurrentFile');if(cf)cf.textContent=currentFile||'—';
+      const log=$('#adminWorkspaceFileLog');if(log)log.textContent=names.length?names.map((n,i)=>`${String(i+1).padStart(2,'0')}  ${n}  (${formatBytes(new Blob([files[n]?.content||'']).size)})`).join('\n'):'Workspace boş.';
+    }
+    function engineHealth(name){return window[name]&&typeof window[name].generate==='function'?'✓ Hazır':'✕ Yok';}
+    function refreshDiagnostics(){
+      const f=$('#diagFlashStatus');if(f){f.textContent=engineHealth('BilalAIResponseEngine');f.className='value '+(f.textContent==='✓ Hazır'?'health-ok':'health-bad');}
+      const l=$('#diagLiteStatus');if(l){l.textContent=engineHealth('BilalAIFlashLite');l.className='value '+(l.textContent==='✓ Hazır'?'health-ok':'health-bad');}
+      const p=$('#diagProStatus');if(p){p.textContent=window.BilalAIPro&&typeof window.BilalAIPro.generateAsync==='function'?'✓ Hazır':'✕ Yok';p.className='value '+(p.textContent==='✓ Hazır'?'health-ok':'health-bad');}
+      const log=$('#adminDiagLog');if(log)log.textContent=[
+        new Date().toLocaleString('tr-TR'),
+        'Flash: '+(window.BilalAIResponseEngine?'loaded':'missing'),
+        'FlashLite: '+(window.BilalAIFlashLite?'loaded':'missing'),
+        'Pro: '+(window.BilalAIPro?'loaded':'missing'),
+        'IndexedDB: '+(workspaceReady?'ready':'fallback'),
+        'Workspace: '+Object.keys(files).length+' dosya'
+      ].join('\n');
+    }
+    function adminDownloadJson(filename,data){
+      const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }
+    $('#workspaceJsonImportInput')?.addEventListener('change',async e=>{
+      const file=e.target.files?.[0];
+      e.target.value='';
+      if(!file)return;
+      try{
+        const parsed=JSON.parse(await file.text());
+        const incoming=parsed&&parsed.files?parsed.files:null;
+        if(!incoming||typeof incoming!=='object')throw new Error('Geçersiz workspace JSON');
+        let count=0;
+        for(const [name,value] of Object.entries(incoming)){
+          const content=typeof value==='string'?value:String(value?.content??'');
+          await addFile(name,content,String(value?.language||name.split('.').pop()||''));
+          count++;
+        }
+        refreshAdminWorkspaceStats();
+        toast(`✓ ${count} workspace dosyası içe aktarıldı`);
+      }catch(err){
+        console.warn('Workspace JSON import:',err);
+        toast('⚠️ Workspace JSON içe aktarılamadı');
+      }
+    });
+    $('#adminRefreshWorkspaceBtn')?.addEventListener('click',()=>{refreshAdminWorkspaceStats();toast('✓ Workspace istatistikleri güncellendi');});
+    $('#adminExportWorkspaceBtn')?.addEventListener('click',()=>adminDownloadJson('bilalai-workspace.json',{version:1,createdAt:new Date().toISOString(),files:Object.fromEntries(Object.entries(files).map(([name,f])=>[name,{content:f.content,language:f.language,updatedAt:f.updatedAt}]))}));
+    $('#adminImportWorkspaceBtn')?.addEventListener('click',()=>$('#workspaceJsonImportInput')?.click());
+    $('#adminClearWorkspaceBtn')?.addEventListener('click',async()=>{if(!confirm('Workspace içindeki tüm dosyalar silinsin mi?'))return;for(const name of Object.keys(files)){delete files[name];if(workspaceReady){try{await idbDelete(name);}catch{}}}currentFile=null;$('#editorFileName').textContent='Dosya seçilmedi';$('#fileEditor').value='';updateLineNumbers();renderFiles();updateStorageLabel();refreshAdminWorkspaceStats();toast('🗑️ Workspace temizlendi');});
+    $('#adminRunDiagnosticsBtn')?.addEventListener('click',()=>{refreshDiagnostics();toast('🩺 Tanılama tamamlandı');});
+    $('#adminCopyDiagnosticsBtn')?.addEventListener('click',async()=>{const txt=$('#adminDiagLog')?.textContent||'';try{await navigator.clipboard.writeText(txt);toast('✓ Rapor kopyalandı');}catch{toast('⚠️ Kopyalanamadı');}});
+    $('#adminClearDiagLogBtn')?.addEventListener('click',()=>{if($('#adminDiagLog'))$('#adminDiagLog').textContent='Günlük temizlendi.';});
+    $('#adminResetPickerBtn')?.addEventListener('click',()=>{const st=getSettings();st.currentModel='flash';setSettings(st);renderModelPicker();toast('✓ Flash 1.2 seçildi');});
 
     document.addEventListener('keydown',e=>{
       if(e.key==='Escape'){closeModelMenus();$('#modelModal')?.classList.remove('active');$('#previewModal')?.classList.remove('active');}
@@ -1552,7 +1749,7 @@ window.addEventListener('error', function(e){ console.error('🔥 JS HATASI:', {
         (r.type === 'childList' && r.addedNodes && r.addedNodes.length) ||
         r.type === 'characterData'
       );
-      if(relevant) scrollToLatest('smooth');
+      if(relevant) scrollToLatest('auto');
     });
     observer.observe(messages,{subtree:true,childList:true,characterData:true});
 
