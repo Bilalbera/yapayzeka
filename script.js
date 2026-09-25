@@ -956,48 +956,81 @@ const MODELS = {
     return out.join('\n');
   }
 
-  /* ========== Yanıt Motoru (Entegrasyon: flashmodel.js + flashlitemodel.js + promodel.js) ========== */
-  async function generateResponse(userMsg, modelKey, chat) {
-    // --- Pro 1.0: tamamen ayrı yol, fallback yok ---
-    if (isProModel(modelKey)) {
-      try {
-        return await runProAgent(userMsg);
-      } catch (e) {
-        console.error('[BilalAI Pro] agent hatası:', e);
-        return '⚠️ **Pro 1.0 görevi tamamlanamadı:** ' + (e && e.message ? e.message : 'bilinmeyen hata');
-      }
-    }
+async function runProAgent(userMsg) {
+  const Pro = window.BilalAIPro;
 
-    const meta = MODELS[modelKey] || MODELS.flash;
-    let Engine = null;
-    if (meta && meta.engine === 'BilalAIFlashLite' && window.BilalAIFlashLite && typeof window.BilalAIFlashLite.generate === 'function') {
-      Engine = window.BilalAIFlashLite;
-    } else if (window.BilalAIResponseEngine && typeof window.BilalAIResponseEngine.generate === 'function') {
-      Engine = window.BilalAIResponseEngine;
-    }
-    if (Engine) {
-      try {
-        const ctx = buildContext(chat, modelKey === 'flashlite' ? 3 : 5);
-        return Engine.generate(userMsg, ctx);
-      } catch (e) {
-        console.warn('Model engine hatası, fallback:', e);
-      }
-    }
-    // Fallback: motor yoksa basit yanıt
-    const m = meta;
-    return [
-      `${m.icon || '⚡'} Anladım! **"${truncate(userMsg, 90)}"** hakkında konuşuyoruz.\n\n`,
-      `Konuyu daha derin inceleyebilmem için birkaç detay paylaşabilir misin?\n`,
-      `- Ne **tür** bir sonuç beklüyorsun?\n`,
-      `- Hangi **ortam / teknoloji** ile çalışıyoruz?\n`,
-      `Sorduğun soruyu veya isteğini biraz daha açarsan sana en uygun yanıtı hazırlayacağım! 💪`
-    ].join('\n');
+  if (!Pro || typeof Pro.runTask !== 'function') {
+    return '⚠️ **Pro 1.0 motoru yüklenemedi** (`promodel.js`).\n\nPro modundayken Flash motoruna düşülmez; lütfen sayfayı yenileyip tekrar deneyin.';
   }
 
-  function truncate(s, n) {
-    s = (s || '').trim();
-    return s.length > n ? s.slice(0, n) + '…' : s;
+  const bridge = window.BilalAIProBridge || {};
+  const options = {};
+
+  if (bridge.workspace) options.workspace = bridge.workspace;
+  if (bridge.preview) options.preview = bridge.preview;
+
+  const result = await Pro.runTask(userMsg, options);
+
+  // Tanılama için Pro'nun gerçek çıktısını konsola bırak
+  console.group('[BilalAI Pro] runTask sonucu');
+  console.log('userMsg:', userMsg);
+  console.log('result:', result);
+  console.log('response:', result?.response);
+  console.log('ok:', result?.ok);
+  console.log('testStatus:', result?.testStatus);
+  console.log('errors:', result?.errors);
+  console.log('validation:', result?.validation);
+  console.groupEnd();
+
+  const out = [
+    '🧠 **BilalAI - Pro 1.0** — agent akışı tamamlandı.',
+    ''
+  ];
+
+  out.push(result?.response || '⚠️ Pro herhangi bir yanıt döndürmedi.');
+
+  if (Array.isArray(result?.filesDetailed) && result.filesDetailed.length) {
+    out.push('', '### Workspace');
+
+    result.filesDetailed.forEach(f => {
+      out.push(
+        `• \`${f.path}\` — ${
+          f.status === 'updated' ? 'güncellendi' : 'oluşturuldu'
+        } (workspace\'e yazıldı)`
+      );
+    });
   }
+
+  const fixAttempts =
+    result?.fixAttempts ??
+    result?.state?.fixAttempts ??
+    0;
+
+  if (fixAttempts > 0) {
+    out.push('', `🔧 Otomatik düzeltme denemesi: **${fixAttempts}/3**`);
+  }
+
+  if (result?.preview?.available) {
+    out.push(
+      '',
+      '▶ Preview hazır — workspace panelindeki **Preview** sekmesinden açabilirsin.'
+    );
+  }
+
+  // Sadece açıkça başarısız olduğu belirtilirse uyar
+  const validationFailed =
+    result?.ok === false ||
+    result?.testStatus === 'failed';
+
+  if (validationFailed) {
+    out.push(
+      '',
+      '⚠️ Bazı doğrulamalar geçmedi; yukarıdaki hata listesine bak.'
+    );
+  }
+
+  return out.join('\n');
+}
 
   function detectCodeIntent(t) {
     const patterns = [
