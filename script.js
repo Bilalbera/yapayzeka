@@ -913,48 +913,95 @@ const MODELS = {
     }));
   }
 
-  /* ========== Model yönlendirme yardımcıları ========== */
-  function isProModel(modelKey) {
-    const meta = MODELS[modelKey];
-    return modelKey === 'pro' || (meta && meta.engine === 'BilalAIPro');
+/* ========== Model yönlendirme yardımcıları ========== */
+function isProModel(modelKey) {
+  const meta = MODELS[modelKey];
+  return modelKey === 'pro' || (meta && meta.engine === 'BilalAIPro');
+}
+
+/*
+ * BilalAI Pro 1.1 — bağımsız agent akışı.
+ *
+ * ÖNEMLİ:
+ * - Buradan ASLA BilalAIResponseEngine / BilalAIFlashLite çağrılmaz.
+ * - promodel.js içindeki gerçek public API kullanılır.
+ * - Pro.generateAsync(userMsg) tüm pipeline'ı çalıştırır:
+ *   analyze → plan → tasks → test → validate → preview → report
+ */
+async function runProAgent(userMsg) {
+  const Pro = window.BilalAIPro;
+
+  if (!Pro || typeof Pro.generateAsync !== 'function') {
+    return '⚠️ **BilalAI Pro 1.1 motoru yüklenemedi** (`promodel.js`).\n\nPro modundayken Flash motoruna düşülmez; lütfen sayfayı yenileyip tekrar deneyin.';
   }
 
-  /* Pro 1.0 — bağımsız agent akışı.
-     Buradan ASLA BilalAIResponseEngine / BilalAIFlashLite çağrılmaz. */
-  async function runProAgent(userMsg) {
-    const Pro = window.BilalAIPro;
-    if (!Pro || typeof Pro.runTask !== 'function') {
-      return '⚠️ **Pro 1.0 motoru yüklenemedi** (`promodel.js`).\n\nPro modundayken Flash motoruna düşülmez; lütfen sayfayı yenileyip tekrar deneyin.';
+  try {
+    const result = await Pro.generateAsync(userMsg);
+
+    if (!result) {
+      throw new Error('BilalAIPro.generateAsync boş sonuç döndürdü.');
     }
 
-    const bridge = window.BilalAIProBridge || {};
-    const options = {};
-    if (bridge.workspace) options.workspace = bridge.workspace;
-    if (bridge.preview) options.preview = bridge.preview;
+    // promodel.js -> { report, formatted, state }
+    if (typeof result.formatted === 'string' && result.formatted.trim()) {
+      return result.formatted;
+    }
 
-    const result = await Pro.runTask(userMsg, options);
+    // Güvenli fallback
+    if (result.report) {
+      const report = result.report;
 
-    const out = ['🧠 **BilalAI - Pro 1.0** — agent akışı tamamlandı.', ''];
-    out.push(result.response || '');
+      const out = [
+        '🧠 **BilalAI - Pro 1.1**',
+        '',
+        `**Görev:** ${report.task || userMsg}`,
+        `**Karmaşıklık:** ${report.complexity || 'unknown'}`,
+        `**Görevler:** ${report.tasksCompleted || '0/0'}`,
+        ''
+      ];
 
-    if (result.filesDetailed && result.filesDetailed.length) {
-      out.push('', '### Workspace');
-      result.filesDetailed.forEach(f => {
-        out.push(`• \`${f.path}\` — ${f.status === 'updated' ? 'güncellendi' : 'oluşturuldu'} (workspace'e yazıldı)`);
-      });
+      if (report.filesChanged && report.filesChanged.length) {
+        out.push('### Değiştirilen Dosyalar');
+
+        for (const file of report.filesChanged) {
+          out.push(
+            `• \`${file.file}\` — ${file.action || 'UPDATE'}`
+          );
+        }
+
+        out.push('');
+      }
+
+      if (report.tests) {
+        out.push(
+          `### Testler`,
+          `• Mod: **${report.tests.mode || 'static'}**`,
+          `• Toplam: **${report.tests.total || 0}**`,
+          `• Başarılı: **${report.tests.passed || 0}**`,
+          `• Başarısız: **${report.tests.failed || 0}**`,
+          ''
+        );
+      }
+
+      out.push(
+        `### Runtime`,
+        `• Durum: **${report.runtimeStatus || 'unavailable'}**`,
+        `• Önizleme: **${report.previewStatus || 'not-applicable'}**`
+      );
+
+      return out.join('\n');
     }
-    if (result.fixAttempts || (result.state && result.state.fixAttempts)) {
-      const n = result.fixAttempts || result.state.fixAttempts;
-      if (n) out.push('', `🔧 Otomatik düzeltme denemesi: **${n}/3**`);
-    }
-    if (result.preview && result.preview.available) {
-      out.push('', '▶ Preview hazır — workspace panelindeki **Preview** sekmesinden açabilirsin.');
-    }
-    if (!result.ok || result.testStatus === 'failed') {
-      out.push('', '⚠️ Bazı doğrulamalar geçmedi; yukarıdaki hata listesine bak.');
-    }
-    return out.join('\n');
+
+    throw new Error('Pro motorundan kullanılabilir yanıt alınamadı.');
+  } catch (err) {
+    console.error('[BilalAI Pro] runProAgent HATASI:', err);
+
+    return (
+      '⚠️ **BilalAI Pro çalışırken hata oluştu.**\n\n' +
+      `\`${err.message || 'Bilinmeyen hata'}\``
+    );
   }
+}
 
 async function runProAgent(userMsg) {
   const Pro = window.BilalAIPro;
